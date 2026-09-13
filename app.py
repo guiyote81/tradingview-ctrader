@@ -8,19 +8,9 @@ CLIENT_ID = os.environ.get("CTRADER_CLIENT_ID")
 CLIENT_SECRET = os.environ.get("CTRADER_CLIENT_SECRET")
 REDIRECT_URI = os.environ.get("CTRADER_REDIRECT_URI")
 
-app.add_url_rule(
-"/",
-"home",
-lambda: "Servidor TradingView cTrader funcionando"
-)
+app.add_url_rule("/", "home", lambda: "Servidor TradingView cTrader funcionando")
 
-def callback():
-code = request.args.get("code")
-
-if not code:
-return "No se recibió código de autorización", 400
-
-response = requests.get(
+exchange_token = lambda code: requests.get(
 "https://openapi.ctrader.com/apps/token",
 params={
 "grant_type": "authorization_code",
@@ -32,14 +22,11 @@ params={
 timeout=20
 )
 
-data = response.json()
-
-if data.get("errorCode"):
-return "Error cTrader: " + str(data), 400
-
-return "Autorización completada correctamente. Ya podemos continuar."
-
-app.add_url_rule("/callback", "callback", callback)
+app.add_url_rule(
+"/callback",
+"callback",
+lambda: "No se recibió código de autorización" if not request.args.get("code") else ("Autorización recibida correctamente. Podemos continuar." if exchange_token(request.args.get("code")).ok else "Error al obtener el token de cTrader"),
+)
 
 app.add_url_rule(
 "/webhook",
