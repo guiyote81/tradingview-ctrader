@@ -1,11 +1,11 @@
 import os
 import re
 import threading
-import time
-from flask import Flask, request, jsonify
+import logging
+
+from flask import Flask, request, redirect, jsonify
 
 from ctrader_open_api import Client, Protobuf, TcpProtocol, Auth, EndPoints
-
 from ctrader_open_api.messages.OpenApiCommonMessages_pb2 import *
 from ctrader_open_api.messages.OpenApiMessages_pb2 import *
 from ctrader_open_api.messages.OpenApiModelMessages_pb2 import *
@@ -14,54 +14,72 @@ from twisted.internet import reactor
 
 
 # ============================================================
-# CONFIGURACIÓN
+# FLASK
 # ============================================================
 
 app = Flask(__name__)
+
+logging.basicConfig(
+level=logging.INFO,
+format="%(asctime)s [%(levelname)s] %(message)s"
+)
+
+logger = logging.getLogger(__name__)
+
+
+# ============================================================
+# VARIABLES DE ENTORNO
+# ============================================================
 
 CLIENT_ID = os.environ.get("TRADING_CLIENT_ID")
 CLIENT_SECRET = os.environ.get("TRADING_CLIENT_SECRET")
 REDIRECT_URI = os.environ.get("TRADING_REDIRECT_URI")
 
-# DEMO SIEMPRE PARA ESTA PRIMERA PRUEBA
-HOST = EndPoints.PROTOBUF_DEMO_HOST
+if not CLIENT_ID:
+logger.warning("Falta TRADING_CLIENT_ID")
 
-# Lotaje inicial de prueba
-NAS100_LOTS = 0.01
-XAUUSD_LOTS = 0.01
+if not CLIENT_SECRET:
+logger.warning("Falta TRADING_CLIENT_SECRET")
 
-# Cierre por invalidación
-ENABLE_INVALIDATION_CLOSE = True
-
-# Si True, una nueva señal puede volver a abrir una operación
-# después de que la anterior haya sido cerrada.
-ENABLE_REENTRY = True
-
-# Identificador de nuestras operaciones
-ORDER_LABEL = "TV_CTRADER_TEST"
+if not REDIRECT_URI:
+logger.warning("Falta TRADING_REDIRECT_URI")
 
 
 # ============================================================
-# VARIABLES INTERNAS
+# CONFIGURACION DE TRADING
 # ============================================================
+
+# Lotes que queremos utilizar inicialmente.
+# 0.01 = un centésimo de lote.
+NAS100_LOTS = float(os.environ.get("NAS100_LOTS", "0.01"))
+XAUUSD_LOTS = float(os.environ.get("XAUUSD_LOTS", "0.01"))
+
+BOT_LABEL = os.environ.get(
+"BOT_LABEL",
+"TV_SR_M30"
+)
+
+
+# ============================================================
+# ESTADO GLOBAL
+# ============================================================
+
+ctrader_client = None
 
 access_token = None
-refresh_token = None
+account_id = None
 
-current_account_id = None
+symbols = {}
 
-client = None
-client_ready = False
+ctrader_started = False
+account_authorized = False
+symbols_loaded = False
 
-symbol_ids = {}
-
-positions = {}
-
-reactor_started = False
+state_lock = threading.Lock()
 
 
 # ============================================================
-# PÁGINA PRINCIPAL
+# PAGINA PRINCIPAL
 # ============================================================
 
 @app.route("/")
@@ -73,28 +91,36 @@ return """
 </head>
 <body>
 <h2>TradingView → cTrader</h2>
+
 <p>Servidor funcionando.</p>
-<p>Cuenta demo: activa para esta prueba.</p>
-<p>Webhook: /webhook</p>
-<p>Callback OAuth: /callback</p>
+
+<p>
+<a href="/login">
+Autorizar cTrader
+</a>
+</p>
+
+<p>
+Webhook:
+<b>/webhook</b>
+</p>
 </body>
 </html>
 """
 
 
 # ============================================================
-# OAUTH
+# LOGIN cTRADER
 # ============================================================
 
 @app.route("/login")
 def login():
 
 if not CLIENT_ID or not CLIENT_SECRET or not REDIRECT_URI:
-return """
-<h3>Faltan variables de entorno.</h3>
-<p>Revisá TRADING_CLIENT_ID, TRADING_CLIENT_SECRET y
-TRADING_REDIRECT_URI en Render.</p>
-""", 500
+return (
+"Faltan variables de entorno de cTrader.",
+500
+)
 
 auth = Auth(
 CLIENT_ID,
@@ -102,29 +128,31 @@ CLIENT_SECRET,
 REDIRECT_URI
 )
 
-auth_url = auth.getAuthUri()
+url = auth.getAuthUrl()
 
-return f"""
-<html>
-<body>
-<h2>Autorizar cTrader</h2>
-<p>Hacé clic:</p>
-<a href="{auth_url}">AUTORIZAR CUENTA DEMO</a>
-</body>
-</html>
-"""
+logger.info("Redirigiendo a cTrader para autorización.")
 
+return redirect(url)
+
+
+# ============================================================
+# CALLBACK OAUTH
+# ============================================================
 
 @app.route("/callback")
 def callback():
 
 global access_token
-global refresh_token
 
 code = request.args.get("code")
 
 if not code:
-return "No se recibió código de autorización.", 400
+error = request.args.get("error")
+
+return (
+f"Error de autorización cTrader: {error}",
+400
+)
 
 try:
 
@@ -136,16 +164,9 @@ REDIRECT_URI
 
 token = auth.getToken(code)
 
-access_token = token.get("accessToken")
-refresh_token = token.get("refreshToken")
+access_token = token.accessToken
 
-if not access_token:
-return "No se obtuvo accessToken.", 500
-
-print("====================================")
-print("OAUTH CORRECTO")
-print("Access token recibido.")
-print("====================================")
+logger.info("Token de cTrader obtenido correctamente.")
 
 start_ctrader()
 
@@ -153,256 +174,615 @@ return """
 <html>
 <body>
 <h2>Autorización correcta</h2>
-<p>cTrader fue autorizado.</p>
-<p>Podés volver a TradingView.</p>
+
+<p>
+cTrader fue autorizado correctamente.
+</p>
+
+<p>
+Revisá los logs de Render.
+</p>
+
+<p>
+Ya podés volver a TradingView.
+</p>
 </body>
 </html>
 """
 
 except Exception as e:
 
-print("ERROR OAUTH:", repr(e))
+logger.exception(
+"Error obteniendo token de cTrader."
+)
 
-return f"""
-Error durante OAuth:
-{str(e)}
-""", 500
+return (
+f"Error obteniendo token: {str(e)}",
+500
+)
 
 
 # ============================================================
-# CONEXIÓN cTRADER
+# INICIAR cTRADER
 # ============================================================
 
 def start_ctrader():
 
-global client
-global reactor_started
+global ctrader_client
+global ctrader_started
+
+with state_lock:
+
+if ctrader_started:
+logger.info(
+"cTrader ya está iniciado."
+)
+return
 
 if not access_token:
-print("No hay access token.")
+logger.error(
+"No hay access_token."
+)
 return
 
-if client is not None:
-print("Cliente cTrader ya iniciado.")
-return
+try:
 
-print("Iniciando conexión con cTrader Demo...")
+logger.info(
+"Iniciando conexión con cTrader DEMO..."
+)
 
-client = Client(
-HOST,
+ctrader_client = Client(
+EndPoints.PROTOBUF_DEMO_HOST,
 EndPoints.PROTOBUF_PORT,
 TcpProtocol
 )
 
-client.setConnectedCallback(on_connected)
-client.setDisconnectedCallback(on_disconnected)
-client.setMessageReceivedCallback(on_message)
+ctrader_client.setConnectedCallback(
+on_connected
+)
 
-client.startService()
+ctrader_client.setDisconnectedCallback(
+on_disconnected
+)
 
-if not reactor_started:
+ctrader_client.setMessageReceivedCallback(
+on_message
+)
 
-reactor_started = True
+ctrader_client.startService()
 
-thread = threading.Thread(
-target=reactor.run,
+ctrader_started = True
+
+reactor_thread = threading.Thread(
+target=run_reactor,
 daemon=True
 )
 
-thread.start()
+reactor_thread.start()
+
+logger.info(
+"Cliente cTrader iniciado."
+)
+
+except Exception:
+
+logger.exception(
+"Error iniciando cTrader."
+)
 
 
 # ============================================================
-# CONEXIÓN ESTABLECIDA
+# TWISTED REACTOR
 # ============================================================
 
-def on_connected(client_instance):
+def run_reactor():
 
-global client_ready
+try:
 
-print("====================================")
-print("CONECTADO A cTRADER DEMO")
-print("====================================")
+if not reactor.running:
 
-request_msg = ProtoOAApplicationAuthReq()
+reactor.run(
+installSignalHandlers=False
+)
 
-request_msg.clientId = CLIENT_ID
-request_msg.clientSecret = CLIENT_SECRET
+except Exception:
 
-deferred = client_instance.send(request_msg)
-
-deferred.addCallback(on_application_auth)
-deferred.addErrback(on_error)
+logger.exception(
+"Error ejecutando reactor Twisted."
+)
 
 
-def on_application_auth(response):
+# ============================================================
+# CONEXIÓN
+# ============================================================
 
-print("Aplicación cTrader autenticada.")
+def on_connected(client):
 
-request_msg = ProtoOAGetAccountListByAccessTokenReq()
+logger.info(
+"Conectado al servidor Open API de cTrader."
+)
 
-request_msg.accessToken = access_token
+request = ProtoOAApplicationAuthReq()
 
-deferred = client.send(request_msg)
+request.clientId = CLIENT_ID
+request.clientSecret = CLIENT_SECRET
 
-deferred.addCallback(on_account_list)
-deferred.addErrback(on_error)
+client.send(request)
+
+logger.info(
+"Solicitud de autorización de aplicación enviada."
+)
 
 
-def on_account_list(response):
+# ============================================================
+# DESCONEXIÓN
+# ============================================================
 
-global current_account_id
+def on_disconnected(client, reason):
 
-print("Cuentas autorizadas recibidas.")
+logger.warning(
+f"cTrader desconectado: {reason}"
+)
+
+
+# ============================================================
+# MENSAJES RECIBIDOS
+# ============================================================
+
+def on_message(client, message):
+
+try:
+
+payload_type = message.payloadType
+
+logger.info(
+f"Mensaje cTrader recibido. payloadType={payload_type}"
+)
+
+# ----------------------------------------------------
+# AUTORIZACIÓN DE APLICACIÓN
+# ----------------------------------------------------
+
+if payload_type == ProtoOAPayloadType.PROTO_OA_APPLICATION_AUTH_RES:
+
+on_application_auth(
+client,
+message
+)
+
+# ----------------------------------------------------
+# LISTA DE CUENTAS
+# ----------------------------------------------------
+
+elif payload_type == ProtoOAPayloadType.PROTO_OA_GET_ACCOUNT_LIST_BY_ACCESS_TOKEN_RES:
+
+on_account_list(
+client,
+message
+)
+
+# ----------------------------------------------------
+# AUTORIZACIÓN DE CUENTA
+# ----------------------------------------------------
+
+elif payload_type == ProtoOAPayloadType.PROTO_OA_ACCOUNT_AUTH_RES:
+
+on_account_auth(
+client,
+message
+)
+
+# ----------------------------------------------------
+# LISTA DE SÍMBOLOS
+# ----------------------------------------------------
+
+elif payload_type == ProtoOAPayloadType.PROTO_OA_SYMBOLS_LIST_RES:
+
+on_symbols(
+client,
+message
+)
+
+# ----------------------------------------------------
+# DATOS COMPLETOS DE SÍMBOLOS
+# ----------------------------------------------------
+
+elif payload_type == ProtoOAPayloadType.PROTO_OA_SYMBOL_BY_ID_RES:
+
+on_symbols_details(
+client,
+message
+)
+
+# ----------------------------------------------------
+# RESPUESTA DE ORDEN
+# ----------------------------------------------------
+
+elif payload_type == ProtoOAPayloadType.PROTO_OA_EXECUTION_EVENT:
+
+on_execution_event(
+client,
+message
+)
+
+# ----------------------------------------------------
+# ERROR
+# ----------------------------------------------------
+
+elif payload_type == ProtoOAPayloadType.ERROR_RES:
+
+logger.error(
+f"Error recibido de cTrader: {message}"
+)
+
+except Exception:
+
+logger.exception(
+"Error procesando mensaje de cTrader."
+)
+
+
+# ============================================================
+# AUTORIZACIÓN DE APLICACIÓN
+# ============================================================
+
+def on_application_auth(client, message):
+
+logger.info(
+"Aplicación cTrader autorizada."
+)
+
+request = ProtoOAGetAccountListByAccessTokenReq()
+
+request.accessToken = access_token
+
+client.send(request)
+
+logger.info(
+"Solicitando cuentas disponibles."
+)
+
+
+# ============================================================
+# LISTA DE CUENTAS
+# ============================================================
+
+def on_account_list(client, message):
+
+global account_id
+
+response = Protobuf.extract(
+message
+)
 
 accounts = response.ctidTraderAccount
 
 if not accounts:
 
-print("NO HAY CUENTAS AUTORIZADAS.")
-return
-
-# Buscamos primero una cuenta DEMO.
-selected = None
-
-for account in accounts:
-
-print(
-"Cuenta:",
-account.ctidTraderAccountId,
-"LIVE:",
-getattr(account, "isLive", False)
+logger.error(
+"No se encontraron cuentas cTrader."
 )
 
-if not getattr(account, "isLive", False):
-selected = account
+return
+
+logger.info(
+f"Cuentas encontradas: {len(accounts)}"
+)
+
+selected_account = None
+
+# Preferimos DEMO.
+for account in accounts:
+
+logger.info(
+f"Cuenta encontrada: "
+f"{account.ctidTraderAccountId} "
+f"live={account.isLive}"
+)
+
+if not account.isLive:
+
+selected_account = account
 break
 
-# Si por alguna razón no encontramos demo,
-# usamos la primera, pero mostramos aviso.
-if selected is None:
+# Si no hay demo, usamos la primera.
+if selected_account is None:
 
-print("ATENCIÓN: no se encontró cuenta demo.")
-print("Se utilizará la primera cuenta autorizada.")
+selected_account = accounts[0]
 
-selected = accounts[0]
+account_id = selected_account.ctidTraderAccountId
 
-current_account_id = selected.ctidTraderAccountId
+logger.info(
+f"Cuenta seleccionada: {account_id} "
+f"live={selected_account.isLive}"
+)
 
-print("====================================")
-print("CUENTA SELECCIONADA:")
-print(current_account_id)
-print("====================================")
+request = ProtoOAAccountAuthReq()
 
-request_msg = ProtoOAAccountAuthReq()
+request.ctidTraderAccountId = account_id
+request.accessToken = access_token
 
-request_msg.ctidTraderAccountId = current_account_id
-request_msg.accessToken = access_token
+client.send(request)
 
-deferred = client.send(request_msg)
-
-deferred.addCallback(on_account_auth)
-deferred.addErrback(on_error)
-
-
-def on_account_auth(response):
-
-global client_ready
-
-client_ready = True
-
-print("====================================")
-print("CUENTA cTRADER AUTENTICADA")
-print("====================================")
-
-# Pedimos todos los símbolos.
-request_msg = ProtoOASymbolsListReq()
-
-request_msg.ctidTraderAccountId = current_account_id
-
-deferred = client.send(request_msg)
-
-deferred.addCallback(on_symbols)
-deferred.addErrback(on_error)
+logger.info(
+"Solicitud de autorización de cuenta enviada."
+)
 
 
 # ============================================================
-# SÍMBOLOS
+# AUTORIZACIÓN DE CUENTA
 # ============================================================
 
-def on_symbols(response):
+def on_account_auth(client, message):
 
-global symbol_ids
+global account_authorized
 
-print("Recibiendo símbolos de cTrader...")
+response = Protobuf.extract(
+message
+)
+
+account_authorized = True
+
+logger.info(
+f"Cuenta cTrader autorizada: "
+f"{response.ctidTraderAccountId}"
+)
+
+request = ProtoOASymbolsListReq()
+
+request.ctidTraderAccountId = account_id
+
+request.includeArchivedSymbols = False
+
+client.send(request)
+
+logger.info(
+"Solicitando símbolos disponibles."
+)
+
+
+# ============================================================
+# LISTA DE SÍMBOLOS
+# ============================================================
+
+def on_symbols(client, message):
+
+global symbols
+global symbols_loaded
+
+response = Protobuf.extract(
+message
+)
+
+logger.info(
+f"Se recibieron {len(response.symbol)} símbolos."
+)
+
+symbols = {}
+
+requested_names = [
+"NAS100",
+"XAUUSD"
+]
 
 for symbol in response.symbol:
 
-name = symbol.symbolName.upper()
+symbol_name = symbol.symbolName
 
-if name == "NAS100":
-symbol_ids["NAS100"] = symbol.symbolId
+for wanted in requested_names:
 
-if name == "XAUUSD":
-symbol_ids["XAUUSD"] = symbol.symbolId
+if symbol_name.upper() == wanted:
 
-print("====================================")
-print("SÍMBOLOS ENCONTRADOS")
-print(symbol_ids)
-print("====================================")
+symbols[wanted] = {
+"id": symbol.symbolId,
+"name": symbol_name
+}
 
-if "NAS100" not in symbol_ids:
-print("ADVERTENCIA: NAS100 no encontrado.")
+logger.info(
+f"Símbolo encontrado: "
+f"{wanted} "
+f"ID={symbol.symbolId}"
+)
 
-if "XAUUSD" not in symbol_ids:
-print("ADVERTENCIA: XAUUSD no encontrado.")
+if "NAS100" not in symbols:
 
-print("BOT LISTO PARA RECIBIR TRADINGVIEW")
+logger.warning(
+"NAS100 no fue encontrado."
+)
+
+if "XAUUSD" not in symbols:
+
+logger.warning(
+"XAUUSD no fue encontrado."
+)
+
+symbol_ids = []
+
+for item in symbols.values():
+
+symbol_ids.append(
+item["id"]
+)
+
+if symbol_ids:
+
+request = ProtoOASymbolByIdReq()
+
+request.ctidTraderAccountId = account_id
+
+request.symbolId.extend(
+symbol_ids
+)
+
+client.send(request)
+
+logger.info(
+"Solicitando información completa de los símbolos."
+)
+
+else:
+
+symbols_loaded = True
+
+logger.warning(
+"No se encontró ningún símbolo solicitado."
+)
+
+
+# ============================================================
+# INFORMACIÓN COMPLETA DE SÍMBOLOS
+# ============================================================
+
+def on_symbols_details(client, message):
+
+global symbols_loaded
+
+response = Protobuf.extract(
+message
+)
+
+for symbol in response.symbol:
+
+symbol_id = symbol.symbolId
+
+for name, data in symbols.items():
+
+if data["id"] == symbol_id:
+
+data["details"] = symbol
+
+if symbol.HasField("lotSize"):
+
+data["lotSize"] = symbol.lotSize
+
+if symbol.HasField("minVolume"):
+
+data["minVolume"] = symbol.minVolume
+
+if symbol.HasField("stepVolume"):
+
+data["stepVolume"] = symbol.stepVolume
+
+logger.info(
+f"{name}: "
+f"lotSize={data.get('lotSize')} "
+f"minVolume={data.get('minVolume')} "
+f"stepVolume={data.get('stepVolume')}"
+)
+
+symbols_loaded = True
+
+logger.info(
+"Información de símbolos cargada."
+)
+
+
+# ============================================================
+# CONVERTIR LOTES A VOLUMEN cTRADER
+# ============================================================
+
+def lots_to_volume(symbol_name, lots):
+
+data = symbols.get(symbol_name)
+
+if not data:
+
+raise ValueError(
+f"No existe información para {symbol_name}"
+)
+
+lot_size = data.get("lotSize")
+
+if not lot_size:
+
+raise ValueError(
+f"No se pudo obtener lotSize de {symbol_name}"
+)
+
+volume = int(
+round(
+lot_size * lots
+)
+)
+
+min_volume = data.get(
+"minVolume"
+)
+
+step_volume = data.get(
+"stepVolume"
+)
+
+if min_volume and volume < min_volume:
+
+volume = min_volume
+
+if step_volume and step_volume > 0:
+
+volume = (
+volume // step_volume
+) * step_volume
+
+logger.info(
+f"{symbol_name}: "
+f"{lots} lotes → "
+f"volume={volume}"
+)
+
+return volume
 
 
 # ============================================================
 # WEBHOOK TRADINGVIEW
 # ============================================================
 
-@app.route("/webhook", methods=["POST"])
+@app.route(
+"/webhook",
+methods=["POST"]
+)
 def webhook():
 
 try:
 
-data = request.get_json(
-silent=True
-)
-
-if data:
-
-texto = str(data)
-
-else:
-
-texto = request.get_data(
+raw_body = request.get_data(
 as_text=True
 )
 
-texto_upper = texto.upper()
+logger.info(
+"========================================"
+)
 
-print("====================================")
-print("WEBHOOK TRADINGVIEW")
-print(texto)
-print("====================================")
+logger.info(
+"WEBHOOK RECIBIDO DE TRADINGVIEW"
+)
+
+logger.info(
+f"Contenido: {raw_body}"
+)
+
+logger.info(
+"========================================"
+)
+
+message_text = raw_body.upper()
 
 # ----------------------------------------------------
-# INSTRUMENTO
+# DETERMINAR INSTRUMENTO
 # ----------------------------------------------------
 
-if "NAS100" in texto_upper:
+if "NAS100" in message_text:
 
-instrumento = "NAS100"
+symbol_name = "NAS100"
 
-elif "XAUUSD" in texto_upper:
+elif "XAUUSD" in message_text:
 
-instrumento = "XAUUSD"
+symbol_name = "XAUUSD"
 
 else:
+
+logger.warning(
+"No se encontró NAS100 ni XAUUSD."
+)
 
 return jsonify({
 "ok": False,
@@ -410,58 +790,96 @@ return jsonify({
 }), 400
 
 # ----------------------------------------------------
-# DIRECCIÓN
+# DETERMINAR DIRECCIÓN
 # ----------------------------------------------------
 
-if "COMPRA" in texto_upper or "BUY" in texto_upper:
+if (
+"COMPRA" in message_text
+or "BUY" in message_text
+):
 
 side = "BUY"
 
-elif "VENTA" in texto_upper or "SELL" in texto_upper:
+elif (
+"VENTA" in message_text
+or "SELL" in message_text
+):
 
 side = "SELL"
 
 else:
 
-return jsonify({
-"ok": False,
-"error": "COMPRA/VENTA no reconocida"
-}), 400
-
-# ----------------------------------------------------
-# PRECIO DE CONFIRMACIÓN
-# Solo lo guardamos como referencia.
-# La orden se ejecuta al precio de mercado.
-# ----------------------------------------------------
-
-confirmation_price = extract_confirmation_price(
-texto
+logger.warning(
+"No se encontró COMPRA/VENTA."
 )
 
-print("Instrumento:", instrumento)
-print("Dirección:", side)
-print("Confirmación:", confirmation_price)
+return jsonify({
+"ok": False,
+"error": "Dirección no reconocida"
+}), 400
+
+logger.info(
+f"SEÑAL DETECTADA: "
+f"{side} {symbol_name}"
+)
+
+# ----------------------------------------------------
+# VERIFICACIONES
+# ----------------------------------------------------
+
+if not ctrader_client:
+
+logger.error(
+"cTrader todavía no está conectado."
+)
+
+return jsonify({
+"ok": False,
+"error": "cTrader no conectado"
+}), 503
+
+if not account_authorized:
+
+logger.error(
+"La cuenta cTrader no está autorizada."
+)
+
+return jsonify({
+"ok": False,
+"error": "Cuenta cTrader no autorizada"
+}), 503
+
+if symbol_name not in symbols:
+
+logger.error(
+f"Símbolo {symbol_name} no disponible."
+)
+
+return jsonify({
+"ok": False,
+"error": "Símbolo no disponible"
+}), 503
 
 # ----------------------------------------------------
 # ABRIR OPERACIÓN
 # ----------------------------------------------------
 
-result = open_trade(
-instrumento,
+open_trade(
+symbol_name,
 side
 )
 
 return jsonify({
 "ok": True,
-"instrumento": instrumento,
-"side": side,
-"confirmation_price": confirmation_price,
-"resultado": result
+"symbol": symbol_name,
+"side": side
 }), 200
 
 except Exception as e:
 
-print("ERROR WEBHOOK:", repr(e))
+logger.exception(
+"Error procesando webhook."
+)
 
 return jsonify({
 "ok": False,
@@ -470,233 +888,158 @@ return jsonify({
 
 
 # ============================================================
-# EXTRAER PRECIO DE CONFIRMACIÓN
-# ============================================================
-
-def extract_confirmation_price(text):
-
-patterns = [
-r"confirmaci[oó]n\s*:\s*([0-9]+(?:[.,][0-9]+)?)",
-r"confirmacion\s*:\s*([0-9]+(?:[.,][0-9]+)?)"
-]
-
-for pattern in patterns:
-
-match = re.search(
-pattern,
-text,
-re.IGNORECASE
-)
-
-if match:
-
-value = match.group(1)
-
-value = value.replace(",", ".")
-
-try:
-return float(value)
-except:
-return value
-
-return None
-
-
-# ============================================================
 # ABRIR OPERACIÓN
 # ============================================================
 
-def open_trade(instrument, side):
+def open_trade(symbol_name, side):
 
-if not client_ready:
+try:
 
-print("cTrader todavía no está listo.")
-
-return {
-"success": False,
-"error": "cTrader no está autenticado"
-}
-
-if instrument not in symbol_ids:
-
-return {
-"success": False,
-"error": f"Símbolo {instrument} no encontrado"
-}
-
-if instrument == "NAS100":
+if symbol_name == "NAS100":
 
 lots = NAS100_LOTS
 
-elif instrument == "XAUUSD":
+elif symbol_name == "XAUUSD":
 
 lots = XAUUSD_LOTS
 
 else:
 
-return {
-"success": False,
-"error": "Instrumento no permitido"
-}
-
-symbol_id = symbol_ids[instrument]
-
-# cTrader utiliza volumen en centésimas de unidad
-# según el protocolo Open API.
-volume = int(lots * 100)
-
-if volume <= 0:
-
-return {
-"success": False,
-"error": "Lotaje inválido"
-}
-
-print("====================================")
-print("ABRIENDO OPERACIÓN")
-print("Instrumento:", instrument)
-print("Side:", side)
-print("Lotes:", lots)
-print("Symbol ID:", symbol_id)
-print("Volume:", volume)
-print("====================================")
-
-request_msg = ProtoOANewOrderReq()
-
-request_msg.ctidTraderAccountId = current_account_id
-
-request_msg.symbolId = int(symbol_id)
-
-request_msg.orderType = ProtoOAOrderType.MARKET
-
-request_msg.tradeSide = ProtoOATradeSide.Value(side)
-
-request_msg.volume = volume
-
-request_msg.label = ORDER_LABEL
-
-request_msg.comment = "TradingView"
-
-deferred = client.send(
-request_msg
+logger.error(
+f"Instrumento no permitido: {symbol_name}"
 )
 
-deferred.addCallback(
-on_new_order_response
+return
+
+volume = lots_to_volume(
+symbol_name,
+lots
 )
 
-deferred.addErrback(
-on_error
+trade_side = ProtoOATradeSide.Value(
+side
 )
 
-return {
-"success": True,
-"message": "Orden enviada a cTrader",
-"instrument": instrument,
-"side": side,
-"lots": lots
-}
+request = ProtoOANewOrderReq()
 
+request.ctidTraderAccountId = account_id
 
-# ============================================================
-# RESPUESTA DE ORDEN
-# ============================================================
+request.symbolId = symbols[
+symbol_name
+]["id"]
 
-def on_new_order_response(response):
+request.orderType = ProtoOAOrderType.Value(
+"MARKET"
+)
 
-print("====================================")
-print("RESPUESTA DE cTRADER")
-print(response)
-print("====================================")
+request.tradeSide = trade_side
 
-if hasattr(response, "position"):
+request.volume = volume
 
-try:
+request.label = BOT_LABEL
 
-position_id = response.position.positionId
+request.comment = (
+f"TradingView {side}"
+)
 
-print(
-"POSICIÓN ABIERTA:",
-position_id
+logger.info(
+"----------------------------------------"
+)
+
+logger.info(
+f"ENVIANDO ORDEN: "
+f"{side} {symbol_name}"
+)
+
+logger.info(
+f"Lotes: {lots}"
+)
+
+logger.info(
+f"Volumen protocolo: {volume}"
+)
+
+logger.info(
+"----------------------------------------"
+)
+
+ctrader_client.send(
+request
 )
 
 except Exception:
-pass
+
+logger.exception(
+"Error enviando orden."
+)
 
 
 # ============================================================
-# MENSAJES DE cTRADER
+# EVENTO DE EJECUCIÓN
 # ============================================================
 
-def on_message(client_instance, message):
+def on_execution_event(client, message):
 
 try:
 
-msg = Protobuf.extract(message)
+response = Protobuf.extract(
+message
+)
 
-print("cTrader mensaje:", msg)
+logger.info(
+"========================================"
+)
 
-# ----------------------------------------------------
-# AQUÍ RECIBIREMOS EVENTOS DE POSICIONES.
-# Más adelante utilizaremos esto para:
-#
-# - cierre por invalidación
-# - break even
-# - TP
-# - trailing
-# - reapertura
-# ----------------------------------------------------
+logger.info(
+"EVENTO DE EJECUCIÓN cTRADER"
+)
 
-except Exception as e:
+logger.info(
+f"{response}"
+)
 
-print("Error procesando mensaje:", e)
+logger.info(
+"========================================"
+)
 
+except Exception:
 
-# ============================================================
-# DESCONECTADO
-# ============================================================
-
-def on_disconnected(client_instance, reason):
-
-global client_ready
-
-client_ready = False
-
-print("====================================")
-print("cTrader DESCONECTADO")
-print(reason)
-print("====================================")
+logger.exception(
+"Error procesando evento de ejecución."
+)
 
 
 # ============================================================
-# ERRORES
+# HEALTH CHECK
 # ============================================================
 
-def on_error(failure):
+@app.route("/status")
+def status():
 
-print("====================================")
-print("ERROR cTRADER")
-print(failure)
-print("====================================")
+return jsonify({
+"server": "online",
+"ctrader_started": ctrader_started,
+"account_authorized": account_authorized,
+"symbols_loaded": symbols_loaded,
+"account_id": account_id,
+"symbols": symbols
+})
 
 
 # ============================================================
-# INICIO DEL SERVIDOR
+# EJECUCIÓN LOCAL
 # ============================================================
 
 if __name__ == "__main__":
 
-print("====================================")
-print("TRADINGVIEW → cTRADER")
-print("MODO DEMO")
-print("====================================")
+port = int(
+os.environ.get(
+"PORT",
+"10000"
+)
+)
 
 app.run(
 host="0.0.0.0",
-port=int(
-os.environ.get(
-"PORT",
-10000
-)
-)
+port=port
 )
