@@ -1,7 +1,5 @@
 import os
-import threading
 import logging
-
 from flask import Flask, request, redirect, jsonify
 
 from ctrader_open_api import Client, Protobuf, TcpProtocol, Auth, EndPoints
@@ -11,10 +9,6 @@ from ctrader_open_api.messages.OpenApiModelMessages_pb2 import *
 
 from twisted.internet import reactor
 
-
-# ============================================================
-# FLASK
-# ============================================================
 
 app = Flask(__name__)
 
@@ -26,18 +20,9 @@ format="%(asctime)s [%(levelname)s] %(message)s"
 logger = logging.getLogger(__name__)
 
 
-# ============================================================
-# DATOS DE cTRADER
-# ============================================================
-
 CLIENT_ID = os.environ.get("TRADING_CLIENT_ID")
 CLIENT_SECRET = os.environ.get("TRADING_CLIENT_SECRET")
 REDIRECT_URI = os.environ.get("TRADING_REDIRECT_URI")
-
-
-# ============================================================
-# CONFIGURACION
-# ============================================================
 
 NAS100_LOTS = float(
 os.environ.get("NAS100_LOTS", "0.01")
@@ -53,70 +38,36 @@ BOT_LABEL = os.environ.get(
 )
 
 
-# ============================================================
-# VARIABLES GLOBALES
-# ============================================================
-
 ctrader_client = None
-
 access_token = None
-
 account_id = None
 
-account_authorized = False
-
 ctrader_started = False
-
+account_authorized = False
 symbols_loaded = False
 
 symbols = {}
 
-state_lock = threading.Lock()
-
-
-# ============================================================
-# PAGINA PRINCIPAL
-# ============================================================
 
 @app.route("/")
 def home():
-
 return """
 <html>
 <head>
 <title>TradingView cTrader</title>
 </head>
-
 <body>
-
 <h2>TradingView → cTrader</h2>
-
 <p>Servidor funcionando correctamente.</p>
-
-<p>
-<a href="/login">
-Autorizar cTrader
-</a>
-</p>
-
-<p>
-<a href="/status">
-Ver estado
-</a>
-</p>
-
+<p><a href="/login">Autorizar cTrader</a></p>
+<p><a href="/status">Ver estado</a></p>
 </body>
 </html>
 """
 
 
-# ============================================================
-# LOGIN
-# ============================================================
-
 @app.route("/login")
 def login():
-
 auth = Auth(
 CLIENT_ID,
 CLIENT_SECRET,
@@ -132,19 +83,13 @@ logger.info(
 return redirect(url)
 
 
-# ============================================================
-# CALLBACK
-# ============================================================
-
 @app.route("/callback")
 def callback():
-
 global access_token
 
 code = request.args.get("code")
 
 if not code:
-
 error = request.args.get(
 "error",
 "Código de autorización no recibido."
@@ -156,7 +101,6 @@ f"Error de autorización: {error}",
 )
 
 try:
-
 auth = Auth(
 CLIENT_ID,
 CLIENT_SECRET,
@@ -176,23 +120,14 @@ start_ctrader()
 return """
 <html>
 <body>
-
 <h2>Autorización correcta</h2>
-
-<p>
-cTrader fue autorizado correctamente.
-</p>
-
-<p>
-Ahora revisá los Logs de Render.
-</p>
-
+<p>cTrader fue autorizado correctamente.</p>
+<p>Revisá ahora los Logs de Render.</p>
 </body>
 </html>
 """
 
 except Exception as e:
-
 logger.exception(
 "Error obteniendo token."
 )
@@ -203,35 +138,23 @@ f"Error obteniendo token: {str(e)}",
 )
 
 
-# ============================================================
-# INICIAR cTRADER
-# ============================================================
-
 def start_ctrader():
-
 global ctrader_client
 global ctrader_started
 
-with state_lock:
-
 if ctrader_started:
-
 logger.info(
 "cTrader ya estaba iniciado."
 )
-
 return
 
 if not access_token:
-
 logger.error(
 "No existe access_token."
 )
-
 return
 
 try:
-
 logger.info(
 "Iniciando conexión con cTrader DEMO..."
 )
@@ -258,6 +181,12 @@ ctrader_client.startService()
 
 ctrader_started = True
 
+logger.info(
+"Cliente cTrader iniciado."
+)
+
+import threading
+
 thread = threading.Thread(
 target=run_reactor,
 daemon=True
@@ -265,44 +194,25 @@ daemon=True
 
 thread.start()
 
-logger.info(
-"Cliente cTrader iniciado."
-)
-
 except Exception:
-
 logger.exception(
 "Error iniciando cTrader."
 )
 
 
-# ============================================================
-# REACTOR
-# ============================================================
-
 def run_reactor():
-
 try:
-
 if not reactor.running:
-
 reactor.run(
 installSignalHandlers=False
 )
-
 except Exception:
-
 logger.exception(
 "Error ejecutando Twisted."
 )
 
 
-# ============================================================
-# CONECTADO
-# ============================================================
-
 def on_connected(client):
-
 logger.info(
 "CONEXIÓN cTRADER ESTABLECIDA."
 )
@@ -310,7 +220,6 @@ logger.info(
 request = ProtoOAApplicationAuthReq()
 
 request.clientId = CLIENT_ID
-
 request.clientSecret = CLIENT_SECRET
 
 client.send(request)
@@ -320,25 +229,14 @@ logger.info(
 )
 
 
-# ============================================================
-# DESCONECTADO
-# ============================================================
-
 def on_disconnected(client, reason):
-
 logger.warning(
 f"cTrader desconectado: {reason}"
 )
 
 
-# ============================================================
-# MENSAJES
-# ============================================================
-
 def on_message(client, message):
-
 try:
-
 payload_type = message.payloadType
 
 logger.info(
@@ -346,66 +244,53 @@ f"Mensaje recibido de cTrader: {payload_type}"
 )
 
 if payload_type == ProtoOAPayloadType.PROTO_OA_APPLICATION_AUTH_RES:
-
 on_application_auth(
 client,
 message
 )
 
 elif payload_type == ProtoOAPayloadType.PROTO_OA_GET_ACCOUNT_LIST_BY_ACCESS_TOKEN_RES:
-
 on_account_list(
 client,
 message
 )
 
 elif payload_type == ProtoOAPayloadType.PROTO_OA_ACCOUNT_AUTH_RES:
-
 on_account_auth(
 client,
 message
 )
 
 elif payload_type == ProtoOAPayloadType.PROTO_OA_SYMBOLS_LIST_RES:
-
 on_symbols(
 client,
 message
 )
 
 elif payload_type == ProtoOAPayloadType.PROTO_OA_SYMBOL_BY_ID_RES:
-
 on_symbols_details(
 client,
 message
 )
 
 elif payload_type == ProtoOAPayloadType.PROTO_OA_EXECUTION_EVENT:
-
 on_execution_event(
 client,
 message
 )
 
 elif payload_type == ProtoOAPayloadType.ERROR_RES:
-
 logger.error(
 f"ERROR DE cTRADER: {message}"
 )
 
 except Exception:
-
 logger.exception(
 "Error procesando mensaje."
 )
 
 
-# ============================================================
-# AUTORIZACIÓN DE APLICACIÓN
-# ============================================================
-
 def on_application_auth(client, message):
-
 logger.info(
 "APLICACIÓN cTRADER AUTORIZADA."
 )
@@ -421,12 +306,7 @@ logger.info(
 )
 
 
-# ============================================================
-# LISTA DE CUENTAS
-# ============================================================
-
 def on_account_list(client, message):
-
 global account_id
 
 response = Protobuf.extract(
@@ -436,11 +316,9 @@ message
 accounts = response.ctidTraderAccount
 
 if not accounts:
-
 logger.error(
 "NO SE ENCONTRARON CUENTAS."
 )
-
 return
 
 logger.info(
@@ -450,21 +328,16 @@ f"Cuentas encontradas: {len(accounts)}"
 selected_account = None
 
 for account in accounts:
-
 logger.info(
-f"Cuenta: "
-f"{account.ctidTraderAccountId} "
+f"Cuenta: {account.ctidTraderAccountId} "
 f"Live={account.isLive}"
 )
 
 if not account.isLive:
-
 selected_account = account
-
 break
 
 if selected_account is None:
-
 selected_account = accounts[0]
 
 account_id = (
@@ -478,7 +351,6 @@ f"CUENTA SELECCIONADA: {account_id}"
 request = ProtoOAAccountAuthReq()
 
 request.ctidTraderAccountId = account_id
-
 request.accessToken = access_token
 
 client.send(request)
@@ -488,12 +360,7 @@ logger.info(
 )
 
 
-# ============================================================
-# CUENTA AUTORIZADA
-# ============================================================
-
 def on_account_auth(client, message):
-
 global account_authorized
 
 response = Protobuf.extract(
@@ -510,7 +377,6 @@ f"{response.ctidTraderAccountId}"
 request = ProtoOASymbolsListReq()
 
 request.ctidTraderAccountId = account_id
-
 request.includeArchivedSymbols = False
 
 client.send(request)
@@ -520,12 +386,7 @@ logger.info(
 )
 
 
-# ============================================================
-# LISTA DE SÍMBOLOS
-# ============================================================
-
 def on_symbols(client, message):
-
 global symbols
 global symbols_loaded
 
@@ -534,18 +395,15 @@ message
 )
 
 logger.info(
-f"Símbolos recibidos: "
-f"{len(response.symbol)}"
+f"Símbolos recibidos: {len(response.symbol)}"
 )
 
 symbols = {}
 
 for symbol in response.symbol:
-
 name = symbol.symbolName
 
 if name.upper() == "NAS100":
-
 symbols["NAS100"] = {
 "id": symbol.symbolId,
 "name": name
@@ -556,7 +414,6 @@ f"NAS100 ENCONTRADO. ID={symbol.symbolId}"
 )
 
 if name.upper() == "XAUUSD":
-
 symbols["XAUUSD"] = {
 "id": symbol.symbolId,
 "name": name
@@ -567,13 +424,11 @@ f"XAUUSD ENCONTRADO. ID={symbol.symbolId}"
 )
 
 if not symbols:
-
 logger.warning(
 "NO SE ENCONTRARON NAS100/XAUUSD."
 )
 
 symbols_loaded = True
-
 return
 
 request = ProtoOASymbolByIdReq()
@@ -581,7 +436,6 @@ request = ProtoOASymbolByIdReq()
 request.ctidTraderAccountId = account_id
 
 for data in symbols.values():
-
 request.symbolId.append(
 data["id"]
 )
@@ -593,12 +447,7 @@ logger.info(
 )
 
 
-# ============================================================
-# INFORMACIÓN COMPLETA DE SÍMBOLOS
-# ============================================================
-
 def on_symbols_details(client, message):
-
 global symbols_loaded
 
 response = Protobuf.extract(
@@ -606,20 +455,12 @@ message
 )
 
 for symbol in response.symbol:
-
 for name, data in symbols.items():
-
 if data["id"] == symbol.symbolId:
-
 data["details"] = symbol
 
 logger.info(
-f"Información completa: "
-f"{name}"
-)
-
-logger.info(
-f"{symbol}"
+f"Información completa recibida: {name}"
 )
 
 symbols_loaded = True
@@ -629,18 +470,12 @@ logger.info(
 )
 
 
-# ============================================================
-# CONVERSIÓN DE LOTES
-# ============================================================
-
 def lots_to_volume(symbol_name, lots):
-
 data = symbols.get(
 symbol_name
 )
 
 if not data:
-
 raise ValueError(
 f"Símbolo no encontrado: {symbol_name}"
 )
@@ -650,16 +485,9 @@ symbol = data.get(
 )
 
 if symbol is None:
-
 raise ValueError(
 f"No hay información completa de {symbol_name}"
 )
-
-# cTrader utiliza volumen expresado
-# en centésimas de unidad.
-#
-# Para esta primera prueba utilizamos
-# el lotSize del símbolo si está disponible.
 
 lot_size = getattr(
 symbol,
@@ -680,7 +508,6 @@ symbol,
 )
 
 if lot_size <= 0:
-
 raise ValueError(
 f"lotSize inválido para {symbol_name}"
 )
@@ -692,36 +519,27 @@ lot_size * lots
 )
 
 if min_volume > 0 and volume < min_volume:
-
 volume = min_volume
 
 if step_volume > 0:
-
 volume = (
 volume // step_volume
 ) * step_volume
 
 logger.info(
 f"{symbol_name}: "
-f"{lots} lotes -> "
-f"volume={volume}"
+f"{lots} lotes -> volume={volume}"
 )
 
 return volume
 
-
-# ============================================================
-# WEBHOOK TRADINGVIEW
-# ============================================================
 
 @app.route(
 "/webhook",
 methods=["POST"]
 )
 def webhook():
-
 try:
-
 body = request.get_data(
 as_text=True
 )
@@ -744,20 +562,13 @@ logger.info(
 
 text = body.upper()
 
-# ----------------------------------------------------
-# INSTRUMENTO
-# ----------------------------------------------------
-
 if "NAS100" in text:
-
 symbol_name = "NAS100"
 
 elif "XAUUSD" in text:
-
 symbol_name = "XAUUSD"
 
 else:
-
 logger.warning(
 "Instrumento no reconocido."
 )
@@ -767,26 +578,19 @@ return jsonify({
 "error": "Instrumento no reconocido"
 }), 400
 
-# ----------------------------------------------------
-# DIRECCIÓN
-# ----------------------------------------------------
-
 if (
 "COMPRA" in text
 or "BUY" in text
 ):
-
 side = "BUY"
 
 elif (
 "VENTA" in text
 or "SELL" in text
 ):
-
 side = "SELL"
 
 else:
-
 logger.warning(
 "COMPRA/VENTA no encontrada."
 )
@@ -797,15 +601,10 @@ return jsonify({
 }), 400
 
 logger.info(
-f"SEÑAL: {side} {symbol_name}"
+f"SEÑAL DETECTADA: {side} {symbol_name}"
 )
 
-# ----------------------------------------------------
-# COMPROBAR CONEXIÓN
-# ----------------------------------------------------
-
 if ctrader_client is None:
-
 logger.error(
 "cTrader no está conectado."
 )
@@ -816,7 +615,6 @@ return jsonify({
 }), 503
 
 if not account_authorized:
-
 logger.error(
 "Cuenta cTrader no autorizada."
 )
@@ -827,7 +625,6 @@ return jsonify({
 }), 503
 
 if symbol_name not in symbols:
-
 logger.error(
 f"{symbol_name} no está disponible."
 )
@@ -836,10 +633,6 @@ return jsonify({
 "ok": False,
 "error": "Símbolo no disponible"
 }), 503
-
-# ----------------------------------------------------
-# ENVIAR ORDEN
-# ----------------------------------------------------
 
 open_trade(
 symbol_name,
@@ -853,7 +646,6 @@ return jsonify({
 }), 200
 
 except Exception as e:
-
 logger.exception(
 "ERROR EN WEBHOOK"
 )
@@ -864,28 +656,18 @@ return jsonify({
 }), 500
 
 
-# ============================================================
-# ABRIR OPERACIÓN
-# ============================================================
-
 def open_trade(symbol_name, side):
-
 try:
-
 if symbol_name == "NAS100":
-
 lots = NAS100_LOTS
 
 elif symbol_name == "XAUUSD":
-
 lots = XAUUSD_LOTS
 
 else:
-
 logger.error(
 f"Símbolo no permitido: {symbol_name}"
 )
-
 return
 
 volume = lots_to_volume(
@@ -934,7 +716,7 @@ f"Lotes: {lots}"
 )
 
 logger.info(
-f"Volumen cTrader: {volume}"
+f"Volumen: {volume}"
 )
 
 logger.info(
@@ -946,20 +728,13 @@ request
 )
 
 except Exception:
-
 logger.exception(
 "ERROR ENVIANDO ORDEN"
 )
 
 
-# ============================================================
-# EVENTO DE EJECUCIÓN
-# ============================================================
-
 def on_execution_event(client, message):
-
 try:
-
 response = Protobuf.extract(
 message
 )
@@ -981,19 +756,13 @@ logger.info(
 )
 
 except Exception:
-
 logger.exception(
 "Error procesando ejecución."
 )
 
 
-# ============================================================
-# ESTADO
-# ============================================================
-
 @app.route("/status")
 def status():
-
 return jsonify({
 "server": "online",
 "ctrader_started": ctrader_started,
@@ -1007,12 +776,7 @@ for name, data in symbols.items()
 })
 
 
-# ============================================================
-# EJECUCIÓN LOCAL
-# ============================================================
-
 if __name__ == "__main__":
-
 port = int(
 os.environ.get(
 "PORT",
