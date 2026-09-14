@@ -1,4 +1,4 @@
-from flask import Flask, request, redirect, jsonify
+from flask import Flask, request, jsonify
 import os
 
 app = Flask(__name__)
@@ -8,10 +8,12 @@ CLIENT_SECRET = os.getenv("TRADING_CLIENT_SECRET")
 REDIRECT_URI = os.getenv("TRADING_REDIRECT_URI")
 
 
+@app.route("/")
 def home():
 return "Servidor TradingView -> cTrader funcionando"
 
 
+@app.route("/status")
 def status():
 return jsonify({
 "servidor": "online",
@@ -21,6 +23,7 @@ return jsonify({
 })
 
 
+@app.route("/webhook", methods=["POST"])
 def webhook():
 mensaje = request.get_data(as_text=True)
 texto = mensaje.upper()
@@ -38,21 +41,19 @@ operacion = "BUY"
 elif "VENTA" in texto or "SELL" in texto:
 operacion = "SELL"
 
+print("======================================")
 print("ALERTA RECIBIDA DESDE TRADINGVIEW")
 print("Mensaje:", mensaje)
 print("Instrumento:", instrumento)
 print("Operacion:", operacion)
+print("======================================")
 
 return jsonify({
 "ok": True,
 "instrumento": instrumento,
-"operacion": operacion
-})
-
-
-app.add_url_rule("/", "home", home)
-app.add_url_rule("/status", "status", status)
-app.add_url_rule("/webhook", "webhook", webhook, methods=["POST"])
+"operacion": operacion,
+"mensaje": "Alerta recibida correctamente"
+}), 200
 
 
 if __name__ == "__main__":
