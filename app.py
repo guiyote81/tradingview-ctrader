@@ -24,7 +24,7 @@ account_authenticated = False
 
 
 def conectar_ctrader():
-global ctrader_client
+    global ctrader_client
 
 if not CLIENT_ID:
 print("ERROR: falta CTRADER_CLIENT_ID")
