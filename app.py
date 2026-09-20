@@ -19,10 +19,6 @@ from twisted.internet import reactor
 app = Flask(__name__)
 
 
-# ============================================================
-# VARIABLES DE RENDER
-# ============================================================
-
 CLIENT_ID = os.getenv("CTRADER_CLIENT_ID")
 CLIENT_SECRET = os.getenv("CTRADER_CLIENT_SECRET")
 ACCESS_TOKEN = os.getenv("CTRADER_ACCESS_TOKEN")
@@ -32,20 +28,13 @@ print("DEBUG: CTRADER_CLIENT_SECRET cargado:", bool(CLIENT_SECRET))
 print("DEBUG: CTRADER_ACCESS_TOKEN cargado:", bool(ACCESS_TOKEN))
 
 
-# ============================================================
-# VARIABLES CTRADER
-# ============================================================
-
 ctrader_client = None
 account_id = None
 account_authenticated = False
 
 
-# ============================================================
-# CONEXIÓN CON CTRADER
-# ============================================================
-
 def conectar_ctrader():
+
 global ctrader_client
 global account_id
 global account_authenticated
@@ -67,6 +56,7 @@ print("INICIANDO CONEXION CTRADER")
 print("================================")
 
 try:
+
 ctrader_client = Client(
 EndPoints.PROTOBUF_DEMO_HOST,
 EndPoints.PROTOBUF_PORT,
@@ -82,90 +72,75 @@ ctrader_client.startService()
 reactor.run(installSignalHandlers=False)
 
 except Exception as e:
+
 print("ERROR CONECTANDO CON CTRADER:", e)
 
 
-# ============================================================
-# CUANDO CONECTA
-# ============================================================
-
 def on_connected(client):
+
 print("================================")
 print("CTRADER CONECTADO")
 print("================================")
 
-request = ProtoOAApplicationAuthReq()
-request.clientId = CLIENT_ID
-request.clientSecret = CLIENT_SECRET
+auth_request = ProtoOAApplicationAuthReq()
 
-client.send(request)
+auth_request.clientId = CLIENT_ID
+auth_request.clientSecret = CLIENT_SECRET
 
+client.send(auth_request)
 
-# ============================================================
-# CUANDO SE DESCONECTA
-# ============================================================
 
 def on_disconnected(client, reason):
+
 print("================================")
 print("CTRADER DESCONECTADO")
 print("Motivo:", reason)
 print("================================")
 
 
-# ============================================================
-# MENSAJES CTRADER
-# ============================================================
-
 def on_message_received(client, message):
+
 global account_id
 global account_authenticated
 
 try:
-payload = Protobuf.extract(message)
 
-# --------------------------------------------
-# AUTENTICACION DE LA APLICACION
-# --------------------------------------------
+payload = Protobuf.extract(message)
 
 if message.payloadType == ProtoOAApplicationAuthRes().payloadType:
 
 print("CTRADER: aplicacion autenticada correctamente")
 
-request = ProtoOAGetAccountListByAccessTokenReq()
-request.accessToken = ACCESS_TOKEN
+request_account = ProtoOAGetAccountListByAccessTokenReq()
 
-client.send(request)
+request_account.accessToken = ACCESS_TOKEN
+
+client.send(request_account)
 
 return
-
-# --------------------------------------------
-# LISTA DE CUENTAS
-# --------------------------------------------
 
 if message.payloadType == ProtoOAGetAccountListByAccessTokenRes().payloadType:
 
 print("CTRADER: lista de cuentas recibida")
 
 if len(payload.ctidTraderAccount) == 0:
+
 print("ERROR: no se encontraron cuentas autorizadas")
+
 return
 
-# Tomamos la primera cuenta autorizada.
 account_id = payload.ctidTraderAccount[0].ctidTraderAccountId
 
 print("CTRADER ACCOUNT ID:", account_id)
 
-request = ProtoOAAccountAuthReq()
-request.ctidTraderAccountId = account_id
-request.accessToken = ACCESS_TOKEN
+account_request = ProtoOAAccountAuthReq()
 
-client.send(request)
+account_request.ctidTraderAccountId = account_id
+account_request.accessToken = ACCESS_TOKEN
+
+client.send(account_request)
 
 return
-
-# --------------------------------------------
-# CUENTA AUTENTICADA
-# --------------------------------------------
 
 if message.payloadType == ProtoOAAccountAuthRes().payloadType:
 
@@ -179,20 +154,19 @@ print("================================")
 return
 
 except Exception as e:
+
 print("ERROR PROCESANDO MENSAJE CTRADER:", e)
 
 
-# ============================================================
-# WEB
-# ============================================================
-
 @app.route("/")
 def home():
+
 return "Servidor TradingView cTrader funcionando"
 
 
 @app.route("/status")
 def status():
+
 return "OK"
 
 
@@ -208,10 +182,6 @@ print("================================")
 
 return "Webhook recibido correctamente"
 
-
-# ============================================================
-# INICIAR CTRADER EN SEGUNDO PLANO
-# ============================================================
 
 threading.Thread(
 target=conectar_ctrader,
