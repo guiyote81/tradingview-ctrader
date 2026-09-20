@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request
 
 app = Flask(__name__)
 
@@ -17,29 +17,12 @@ lambda: "OK"
 app.add_url_rule(
 "/webhook",
 "webhook",
-lambda: jsonify({
-"ok": True,
-"mensaje_original": request.get_data(as_text=True),
-"instrumento": (
-"NAS100"
-if "NAS100" in request.get_data(as_text=True).upper()
-else "XAUUSD"
-if "XAUUSD" in request.get_data(as_text=True).upper()
-else None
-),
-"operacion": (
-"BUY"
-if (
-"COMPRA" in request.get_data(as_text=True).upper()
-or "BUY" in request.get_data(as_text=True).upper()
-)
-else "SELL"
-if (
-"VENTA" in request.get_data(as_text=True).upper()
-or "SELL" in request.get_data(as_text=True).upper()
-)
-else None
-)
-}),
+lambda: (
+print("================================"),
+print("WEBHOOK RECIBIDO"),
+print("Mensaje recibido:", request.get_data(as_text=True)),
+print("================================"),
+"Webhook recibido correctamente"
+)[-1],
 methods=["POST"]
 )
