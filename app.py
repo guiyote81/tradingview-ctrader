@@ -7,9 +7,7 @@ from ctrader_open_api.messages.OpenApiMessages_pb2 import *
 from ctrader_open_api.messages.OpenApiModelMessages_pb2 import *
 from twisted.internet import reactor
 
-
 app = Flask(__name__)
-
 
 CLIENT_ID = os.getenv("CTRADER_CLIENT_ID")
 CLIENT_SECRET = os.getenv("CTRADER_CLIENT_SECRET")
@@ -17,7 +15,6 @@ ACCESS_TOKEN = os.getenv("CTRADER_ACCESS_TOKEN")
 
 
 def iniciar_ctrader():
-
 print("================================")
 print("INICIANDO CTRADER")
 print("================================")
@@ -41,7 +38,6 @@ TcpProtocol
 )
 
 def conectado(client):
-
 print("CTRADER: CONECTADO")
 
 auth = ProtoOAApplicationAuthReq()
@@ -51,14 +47,11 @@ auth.clientSecret = CLIENT_SECRET
 client.send(auth)
 
 def desconectado(client, reason):
-
 print("CTRADER: DESCONECTADO")
 print("Motivo:", reason)
 
 def mensaje_recibido(client, message):
-
 if message.payloadType == ProtoOAApplicationAuthRes().payloadType:
-
 print("CTRADER: APLICACION AUTENTICADA")
 
 cuentas = ProtoOAGetAccountListByAccessTokenReq()
@@ -67,31 +60,26 @@ cuentas.accessToken = ACCESS_TOKEN
 client.send(cuentas)
 
 elif message.payloadType == ProtoOAGetAccountListByAccessTokenRes().payloadType:
-
 respuesta = Protobuf.extract(message)
 
 print("CTRADER: LISTA DE CUENTAS RECIBIDA")
 
 if len(respuesta.ctidTraderAccount) == 0:
-
 print("ERROR: NO HAY CUENTAS AUTORIZADAS")
 return
 
 cuenta = respuesta.ctidTraderAccount[0]
-
 account_id = cuenta.ctidTraderAccountId
 
 print("CTRADER ACCOUNT ID:", account_id)
 
 auth_cuenta = ProtoOAAccountAuthReq()
-
 auth_cuenta.ctidTraderAccountId = account_id
 auth_cuenta.accessToken = ACCESS_TOKEN
 
 client.send(auth_cuenta)
 
 elif message.payloadType == ProtoOAAccountAuthRes().payloadType:
-
 respuesta = Protobuf.extract(message)
 
 print("================================")
@@ -100,18 +88,13 @@ print("ACCOUNT ID:", respuesta.ctidTraderAccountId)
 print("================================")
 
 else:
-
-print(
-"CTRADER MENSAJE:",
-Protobuf.extract(message)
-)
+print("CTRADER MENSAJE:", Protobuf.extract(message))
 
 client.setConnectedCallback(conectado)
 client.setDisconnectedCallback(desconectado)
 client.setMessageReceivedCallback(mensaje_recibido)
 
 client.startService()
-
 reactor.run(installSignalHandlers=False)
 
 
