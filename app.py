@@ -1,6 +1,7 @@
-from flask import Flask
+from flask import Flask, request
 
 app = Flask(__name__)
+
 
 app.add_url_rule(
 "/",
@@ -8,8 +9,21 @@ app.add_url_rule(
 lambda: "Servidor funcionando correctamente"
 )
 
+
 app.add_url_rule(
 "/status",
 "status",
 lambda: "OK"
 )
+
+
+@app.route("/webhook", methods=["POST"])
+def webhook():
+mensaje = request.get_data(as_text=True)
+
+print("======================================")
+print("WEBHOOK RECIBIDO")
+print("Mensaje:", mensaje)
+print("======================================")
+
+return "Webhook recibido correctamente", 200
