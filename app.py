@@ -26,43 +26,43 @@ def desconectado(client, reason):
 def mensaje_recibido(client, message):
     print("CTRADER: MENSAJE RECIBIDO")
     if message.payloadType == ProtoOAApplicationAuthRes().payloadType:
-       print("CTRADER: APLICACION AUTENTICADA")
-       cuentas = ProtoOAGetAccountListByAccessTokenReq()
-       cuentas.accessToken = ACCESS_TOKEN
-       client.send(cuentas)
+        print("CTRADER: APLICACION AUTENTICADA")
+        cuentas = ProtoOAGetAccountListByAccessTokenReq()
+        cuentas.accessToken = ACCESS_TOKEN
+        client.send(cuentas)
     elif message.payloadType == ProtoOAGetAccountListByAccessTokenRes().payloadType:
-         respuesta = Protobuf.extract(message)
-         print("CTRADER: LISTA DE CUENTAS RECIBIDA")
-         if len(respuesta.ctidTraderAccount) == 0:
+        respuesta = Protobuf.extract(message)
+        print("CTRADER: LISTA DE CUENTAS RECIBIDA")
+        if len(respuesta.ctidTraderAccount) == 0:
             print("ERROR: NO HAY CUENTAS AUTORIZADAS")
             return
-         cuenta = respuesta.ctidTraderAccount[0]
-         account_id = cuenta.ctidTraderAccountId
-         print("CTRADER ACCOUNT ID:", account_id)
-         auth_cuenta = ProtoOAAccountAuthReq()
-         auth_cuenta.ctidTraderAccountId = account_id
-         auth_cuenta.accessToken = ACCESS_TOKEN
-         client.send(auth_cuenta)
-     elif message.payloadType == ProtoOAAccountAuthRes().payloadType:
-          respuesta = Protobuf.extract(message)
-          print("================================")
-          print("CUENTA CTRADER AUTENTICADA")
-          print("ACCOUNT ID:", respuesta.ctidTraderAccountId)
-          print("================================")
+        cuenta = respuesta.ctidTraderAccount[0]
+        account_id = cuenta.ctidTraderAccountId
+        print("CTRADER ACCOUNT ID:", account_id)
+        auth_cuenta = ProtoOAAccountAuthReq()
+        auth_cuenta.ctidTraderAccountId = account_id
+        auth_cuenta.accessToken = ACCESS_TOKEN
+        client.send(auth_cuenta)
+    elif message.payloadType == ProtoOAAccountAuthRes().payloadType:
+        respuesta = Protobuf.extract(message)
+        print("================================")
+        print("CUENTA CTRADER AUTENTICADA")
+        print("ACCOUNT ID:", respuesta.ctidTraderAccountId)
+        print("================================")
 
 def iniciar_ctrader():
     print("================================")
     print("INICIANDO CTRADER")
     print("================================")
     if not CLIENT_ID:
-       print("ERROR: falta CTRADER_CLIENT_ID")
-       return
+        print("ERROR: falta CTRADER_CLIENT_ID")
+        return
     if not CLIENT_SECRET:
-       print("ERROR: falta CTRADER_CLIENT_SECRET")
-       return
+        print("ERROR: falta CTRADER_CLIENT_SECRET")
+        return
     if not ACCESS_TOKEN:
-       print("ERROR: falta CTRADER_ACCESS_TOKEN")
-       return
+        print("ERROR: falta CTRADER_ACCESS_TOKEN")
+        return
     client = Client(EndPoints.PROTOBUF_DEMO_HOST, EndPoints.PROTOBUF_PORT, TcpProtocol)
     client.setConnectedCallback(conectado)
     client.setDisconnectedCallback(desconectado)
