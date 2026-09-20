@@ -24,13 +24,9 @@ def conectado(client):
     auth.clientId = CLIENT_ID
     auth.clientSecret = CLIENT_SECRET
 
-    print("CTRADER: ENVIANDO AUTENTICACION DE APLICACION")
+    print("CTRADER: ENVIANDO AUTENTICACION")
 
-    resultado = client.send(auth)
-
-    print("CTRADER: SOLICITUD DE AUTENTICACION ENVIADA")
-
-    return resultado
+    client.send(auth)
 
 
 def desconectado(client, reason):
@@ -49,43 +45,33 @@ def mensaje_recibido(client, message):
         cuentas = ProtoOAGetAccountListByAccessTokenReq()
         cuentas.accessToken = ACCESS_TOKEN
 
-        print("CTRADER: SOLICITANDO LISTA DE CUENTAS")
+        print("CTRADER: SOLICITANDO TODAS LAS CUENTAS")
 
         client.send(cuentas)
 
     elif message.payloadType == ProtoOAGetAccountListByAccessTokenRes().payloadType:
         respuesta = Protobuf.extract(message)
 
-        print("CTRADER: LISTA DE CUENTAS RECIBIDA")
+        print("================================")
+        print("CTRADER: CUENTAS RECIBIDAS")
+        print("CANTIDAD DE CUENTAS:", len(respuesta.ctidTraderAccount))
+        print("================================")
 
-        if len(respuesta.ctidTraderAccount) == 0:
-            print("ERROR: NO HAY CUENTAS AUTORIZADAS")
-            return
-
-        cuenta = respuesta.ctidTraderAccount[0]
-        account_id = cuenta.ctidTraderAccountId
-
-        print("CTRADER ACCOUNT ID:", account_id)
-
-        auth_cuenta = ProtoOAAccountAuthReq()
-        auth_cuenta.ctidTraderAccountId = account_id
-        auth_cuenta.accessToken = ACCESS_TOKEN
-
-        print("CTRADER: AUTENTICANDO CUENTA")
-
-        client.send(auth_cuenta)
-
-    elif message.payloadType == ProtoOAAccountAuthRes().payloadType:
-        respuesta = Protobuf.extract(message)
+        for cuenta in respuesta.ctidTraderAccount:
+            print("--------------------------------")
+            print("ACCOUNT ID:", cuenta.ctidTraderAccountId)
+            print("TRADER LOGIN:", cuenta.traderLogin)
+            print("ES LIVE:", cuenta.isLive)
+            print("BROKER:", cuenta.brokerName)
+            print("--------------------------------")
 
         print("================================")
-        print("CUENTA CTRADER AUTENTICADA")
-        print("ACCOUNT ID:", respuesta.ctidTraderAccountId)
+        print("NO SE AUTENTICARA NINGUNA CUENTA")
+        print("ESTA PRUEBA NO ABRE OPERACIONES")
         print("================================")
 
     else:
         print("CTRADER: OTRO MENSAJE RECIBIDO")
-        print(Protobuf.extract(message))
 
 
 def iniciar_ctrader():
@@ -106,7 +92,6 @@ def iniciar_ctrader():
         return
 
     print("CTRADER: VARIABLES ENCONTRADAS")
-
     print("CTRADER: CREANDO CLIENTE DEMO")
 
     client = Client(
@@ -122,7 +107,6 @@ def iniciar_ctrader():
     client.setMessageReceivedCallback(mensaje_recibido)
 
     print("CTRADER: CALLBACKS CONFIGURADOS")
-
     print("CTRADER: INICIANDO SERVICIO")
 
     client.startService()
