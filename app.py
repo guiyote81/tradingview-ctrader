@@ -1,30 +1,54 @@
+from flask import Flask, request
 import os
 import threading
 
-from flask import Flask, request
-
-from ctrader_open_api import Client, EndPoints, TcpProtocol, Protobuf
+from ctrader_open_api import Client, Protobuf, TcpProtocol
+from ctrader_open_api.endpoints import EndPoints
 from ctrader_open_api.messages.OpenApiMessages_pb2 import (
 ProtoOAApplicationAuthReq,
+ProtoOAApplicationAuthRes,
 ProtoOAGetAccountListByAccessTokenReq,
-ProtoOAAccountAuthReq,
 ProtoOAGetAccountListByAccessTokenRes,
+ProtoOAAccountAuthReq,
 ProtoOAAccountAuthRes,
 )
 
+from twisted.internet import reactor
+
+
 app = Flask(__name__)
+
+
+# ============================================================
+# VARIABLES DE RENDER
+# ============================================================
 
 CLIENT_ID = os.getenv("CTRADER_CLIENT_ID")
 CLIENT_SECRET = os.getenv("CTRADER_CLIENT_SECRET")
 ACCESS_TOKEN = os.getenv("CTRADER_ACCESS_TOKEN")
+
+print("DEBUG: CTRADER_CLIENT_ID cargado:", bool(CLIENT_ID))
+print("DEBUG: CTRADER_CLIENT_SECRET cargado:", bool(CLIENT_SECRET))
+print("DEBUG: CTRADER_ACCESS_TOKEN cargado:", bool(ACCESS_TOKEN))
+
+
+# ============================================================
+# VARIABLES CTRADER
+# ============================================================
 
 ctrader_client = None
 account_id = None
 account_authenticated = False
 
 
+# ============================================================
+# CONEXIÓN CON CTRADER
+# ============================================================
+
 def conectar_ctrader():
-    global ctrader_client
+global ctrader_client
+global account_id
+global account_authenticated
 
 if not CLIENT_ID:
 print("ERROR: falta CTRADER_CLIENT_ID")
@@ -38,6 +62,10 @@ if not ACCESS_TOKEN:
 print("ERROR: falta CTRADER_ACCESS_TOKEN")
 return
 
+print("================================")
+print("INICIANDO CONEXION CTRADER")
+print("================================")
+
 try:
 ctrader_client = Client(
 EndPoints.PROTOBUF_DEMO_HOST,
@@ -47,98 +75,116 @@ TcpProtocol
 
 ctrader_client.setConnectedCallback(on_connected)
 ctrader_client.setDisconnectedCallback(on_disconnected)
-ctrader_client.setMessageReceivedCallback(on_message)
-
-print("================================")
-print("CONECTANDO A CTRADER DEMO...")
-print("================================")
+ctrader_client.setMessageReceivedCallback(on_message_received)
 
 ctrader_client.startService()
 
-except Exception as e:
-print("ERROR AL CONECTAR CON CTRADER:")
-print(e)
+reactor.run(installSignalHandlers=False)
 
+except Exception as e:
+print("ERROR CONECTANDO CON CTRADER:", e)
+
+
+# ============================================================
+# CUANDO CONECTA
+# ============================================================
 
 def on_connected(client):
 print("================================")
-print("CONEXION CON CTRADER DEMO OK")
+print("CTRADER CONECTADO")
 print("================================")
 
-auth = ProtoOAApplicationAuthReq()
-auth.clientId = CLIENT_ID
-auth.clientSecret = CLIENT_SECRET
+request = ProtoOAApplicationAuthReq()
+request.clientId = CLIENT_ID
+request.clientSecret = CLIENT_SECRET
 
-client.send(auth)
+client.send(request)
 
+
+# ============================================================
+# CUANDO SE DESCONECTA
+# ============================================================
 
 def on_disconnected(client, reason):
-global account_authenticated
-
-account_authenticated = False
-
+print("================================")
 print("CTRADER DESCONECTADO")
 print("Motivo:", reason)
+print("================================")
 
 
-def on_message(client, message):
+# ============================================================
+# MENSAJES CTRADER
+# ============================================================
+
+def on_message_received(client, message):
 global account_id
 global account_authenticated
 
 try:
-response = Protobuf.extract(message)
+payload = Protobuf.extract(message)
 
-print("Mensaje recibido desde cTrader:")
-print(response)
+# --------------------------------------------
+# AUTENTICACION DE LA APLICACION
+# --------------------------------------------
 
-if message.payloadType == ProtoOAApplicationAuthReq().payloadType:
-print("Aplicacion autenticada.")
+if message.payloadType == ProtoOAApplicationAuthRes().payloadType:
 
-accounts_request = ProtoOAGetAccountListByAccessTokenReq()
-accounts_request.accessToken = ACCESS_TOKEN
+print("CTRADER: aplicacion autenticada correctamente")
 
-print("Solicitando cuentas autorizadas...")
+request = ProtoOAGetAccountListByAccessTokenReq()
+request.accessToken = ACCESS_TOKEN
 
-client.send(accounts_request)
+client.send(request)
+
 return
+
+# --------------------------------------------
+# LISTA DE CUENTAS
+# --------------------------------------------
 
 if message.payloadType == ProtoOAGetAccountListByAccessTokenRes().payloadType:
-accounts = response.ctidTraderAccount
 
-if not accounts:
-print("NO SE ENCONTRARON CUENTAS AUTORIZADAS.")
+print("CTRADER: lista de cuentas recibida")
+
+if len(payload.ctidTraderAccount) == 0:
+print("ERROR: no se encontraron cuentas autorizadas")
 return
 
-account_id = int(accounts[0].ctidTraderAccountId)
+# Tomamos la primera cuenta autorizada.
+account_id = payload.ctidTraderAccount[0].ctidTraderAccountId
 
-print("================================")
-print("CUENTA ENCONTRADA")
-print("ctidTraderAccountId:", account_id)
-print("================================")
+print("CTRADER ACCOUNT ID:", account_id)
 
-account_auth = ProtoOAAccountAuthReq()
-account_auth.ctidTraderAccountId = account_id
-account_auth.accessToken = ACCESS_TOKEN
+request = ProtoOAAccountAuthReq()
+request.ctidTraderAccountId = account_id
+request.accessToken = ACCESS_TOKEN
 
-print("Autorizando cuenta...")
+client.send(request)
 
-client.send(account_auth)
 return
+
+# --------------------------------------------
+# CUENTA AUTENTICADA
+# --------------------------------------------
 
 if message.payloadType == ProtoOAAccountAuthRes().payloadType:
+
 account_authenticated = True
 
 print("================================")
-print("CUENTA CTRADER AUTORIZADA")
+print("CUENTA CTRADER AUTENTICADA")
+print("ACCOUNT ID:", account_id)
 print("================================")
-print("ctidTraderAccountId:", response.ctidTraderAccountId)
-print("LISTO PARA RECIBIR SEÑALES")
-print("================================")
+
+return
 
 except Exception as e:
-print("ERROR PROCESANDO MENSAJE CTRADER:")
-print(e)
+print("ERROR PROCESANDO MENSAJE CTRADER:", e)
 
+
+# ============================================================
+# WEB
+# ============================================================
 
 @app.route("/")
 def home():
@@ -147,52 +193,27 @@ return "Servidor TradingView cTrader funcionando"
 
 @app.route("/status")
 def status():
-if account_authenticated:
-return "OK - cTrader conectado y cuenta autorizada"
-
-return "OK - servidor funcionando"
+return "OK"
 
 
 @app.route("/webhook", methods=["POST"])
 def webhook():
-mensaje = request.get_data(as_text=True).strip()
+
+mensaje = request.get_data(as_text=True)
 
 print("================================")
 print("WEBHOOK RECIBIDO")
 print("Mensaje recibido:", mensaje)
 print("================================")
 
-if not mensaje:
-return "Mensaje vacio", 400
-
-mensaje = mensaje.upper()
-
-if "COMPRA NASDAQ" in mensaje:
-print("SEÑAL DETECTADA: COMPRA NASDAQ")
-
-elif "VENTA NASDAQ" in mensaje:
-print("SEÑAL DETECTADA: VENTA NASDAQ")
-
-elif "COMPRA XAUUSD" in mensaje:
-print("SEÑAL DETECTADA: COMPRA XAUUSD")
-
-elif "VENTA XAUUSD" in mensaje:
-print("SEÑAL DETECTADA: VENTA XAUUSD")
-
-else:
-print("SEÑAL NO RECONOCIDA")
-
-print("PRUEBA: NO SE EJECUTARA NINGUNA ORDEN.")
-print("================================")
-
-return "Webhook recibido correctamente", 200
+return "Webhook recibido correctamente"
 
 
-def iniciar_ctrader():
-conectar_ctrader()
-
+# ============================================================
+# INICIAR CTRADER EN SEGUNDO PLANO
+# ============================================================
 
 threading.Thread(
-target=iniciar_ctrader,
+target=conectar_ctrader,
 daemon=True
 ).start()
