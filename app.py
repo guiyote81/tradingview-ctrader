@@ -2,23 +2,14 @@ from flask import Flask
 
 app = Flask(__name__)
 
+app.add_url_rule(
+"/",
+"home",
+lambda: "Servidor funcionando correctamente"
+)
 
-@app.route("/")
-def home():
-return "Servidor funcionando correctamente"
-
-
-@app.route("/status")
-def status():
-return "OK"
-
-
-if __name__ == "__main__":
-import os
-
-port = int(os.environ.get("PORT", 10000))
-
-app.run(
-host="0.0.0.0",
-port=port
+app.add_url_rule(
+"/status",
+"status",
+lambda: "OK"
 )
