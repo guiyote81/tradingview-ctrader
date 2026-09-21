@@ -24,6 +24,7 @@ nasdaq_symbol_id = None
 
 
 def conectado(client):
+
     print("================================")
     print("CTRADER: CONECTADO")
     print("================================")
@@ -38,24 +39,10 @@ def conectado(client):
 
 
 def desconectado(client, reason):
+
     print("================================")
     print("CTRADER: DESCONECTADO")
     print("MOTIVO:", reason)
-    print("================================")
-
-
-def mostrar_datos_simbolo(simbolo):
-
-    print("================================")
-    print("DATOS COMPLETOS DEL SIMBOLO")
-    print("================================")
-
-    print("NOMBRE:", simbolo.symbolName)
-    print("SYMBOL ID:", simbolo.symbolId)
-    print("LOT SIZE:", simbolo.lotSize)
-    print("MIN VOLUME:", simbolo.minVolume)
-    print("STEP VOLUME:", simbolo.stepVolume)
-
     print("================================")
 
 
@@ -133,7 +120,7 @@ def mensaje_recibido(client, message):
         simbolos.ctidTraderAccountId = ACCOUNT_ID
         simbolos.includeArchivedSymbols = False
 
-        print("CTRADER: SOLICITANDO TODOS LOS SIMBOLOS")
+        print("CTRADER: SOLICITANDO SIMBOLOS")
 
         client.send(simbolos)
 
@@ -159,7 +146,10 @@ def mensaje_recibido(client, message):
             nombre_mayuscula = nombre.upper()
             nombre_limpio = nombre_mayuscula.replace("/", "")
 
+            # ---------------------------------
             # XAUUSD
+            # ---------------------------------
+
             if nombre_limpio == "XAUUSD":
 
                 xauusd_symbol_id = simbolo.symbolId
@@ -174,9 +164,14 @@ def mensaje_recibido(client, message):
                 detalle.ctidTraderAccountId = ACCOUNT_ID
                 detalle.symbolId.append(xauusd_symbol_id)
 
+                print("CTRADER: SOLICITANDO DATOS XAUUSD")
+
                 client.send(detalle)
 
+            # ---------------------------------
             # NASDAQ
+            # ---------------------------------
+
             if (
                 "NAS100" in nombre_limpio
                 or "NAS100USD" in nombre_limpio
@@ -197,6 +192,8 @@ def mensaje_recibido(client, message):
                 detalle.ctidTraderAccountId = ACCOUNT_ID
                 detalle.symbolId.append(nasdaq_symbol_id)
 
+                print("CTRADER: SOLICITANDO DATOS NASDAQ")
+
                 client.send(detalle)
 
         print("================================")
@@ -211,29 +208,38 @@ def mensaje_recibido(client, message):
 
         respuesta = Protobuf.extract(message)
 
+        print("================================")
+        print("DATOS RECIBIDOS DE SYMBOL BY ID")
+        print("================================")
+
         for simbolo in respuesta.symbol:
 
-            mostrar_datos_simbolo(simbolo)
+            print("--------------------------------")
+            print("SYMBOL ID:", simbolo.symbolId)
+            print("LOT SIZE:", simbolo.lotSize)
+            print("MIN VOLUME:", simbolo.minVolume)
+            print("STEP VOLUME:", simbolo.stepVolume)
+            print("--------------------------------")
 
-            nombre = simbolo.symbolName.upper().replace("/", "")
+            if simbolo.symbolId == xauusd_symbol_id:
 
-            if nombre == "XAUUSD":
+                print("XAUUSD CONFIRMADO")
+                print("SYMBOL ID:", simbolo.symbolId)
+                print("LOT SIZE:", simbolo.lotSize)
+                print("MIN VOLUME:", simbolo.minVolume)
+                print("STEP VOLUME:", simbolo.stepVolume)
 
-                print("================================")
-                print("XAUUSD LISTO")
-                print("================================")
+            elif simbolo.symbolId == nasdaq_symbol_id:
 
-            elif (
-                "NAS100" in nombre
-                or "NAS100USD" in nombre
-                or "USTEC" in nombre
-                or "US100" in nombre
-                or "NASDAQ" in nombre
-            ):
+                print("NASDAQ CONFIRMADO")
+                print("SYMBOL ID:", simbolo.symbolId)
+                print("LOT SIZE:", simbolo.lotSize)
+                print("MIN VOLUME:", simbolo.minVolume)
+                print("STEP VOLUME:", simbolo.stepVolume)
 
-                print("================================")
-                print("NASDAQ LISTO")
-                print("================================")
+        print("================================")
+        print("NO SE ABRIRAN OPERACIONES")
+        print("================================")
 
     # -----------------------------------------
     # OTROS MENSAJES
@@ -253,14 +259,17 @@ def iniciar_ctrader():
     print("================================")
 
     if not CLIENT_ID:
+
         print("ERROR: falta CTRADER_CLIENT_ID")
         return
 
     if not CLIENT_SECRET:
+
         print("ERROR: falta CTRADER_CLIENT_SECRET")
         return
 
     if not ACCESS_TOKEN:
+
         print("ERROR: falta CTRADER_ACCESS_TOKEN")
         return
 
@@ -293,11 +302,13 @@ def iniciar_ctrader():
 
 @app.route("/")
 def home():
+
     return "Servidor funcionando correctamente"
 
 
 @app.route("/status")
 def status():
+
     return "OK"
 
 
