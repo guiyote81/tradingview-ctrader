@@ -1,5 +1,6 @@
 import os
 import threading
+import time
 
 from flask import Flask, request
 
@@ -10,7 +11,6 @@ from ctrader_open_api.messages.OpenApiModelMessages_pb2 import *
 from ctrader_open_api.messages.OpenApiCommonModelMessages_pb2 import *
 
 from twisted.internet import reactor
-from twisted.internet.task import LoopingCall
 
 
 # ============================================================
@@ -30,7 +30,7 @@ CTRADER_ACCESS_TOKEN = os.getenv("CTRADER_ACCESS_TOKEN")
 
 
 # ============================================================
-# CUENTA DEMO
+# CUENTA DEMO CONFIRMADA
 # ============================================================
 
 ACCOUNT_ID = 48481130
@@ -49,14 +49,14 @@ XAUUSD_SYMBOL_ID = 41
 # ============================================================
 
 # NAS100:
-# lot size = 100
+# Lot size = 100
 # 0.01 lote = volumen 10
 
 NASDAQ_VOLUME = 10
 
 
 # XAUUSD:
-# lot size = 10000
+# Lot size = 10000
 # 0.01 lote = volumen 100
 
 XAUUSD_VOLUME = 100
@@ -71,7 +71,7 @@ TAKE_PROFIT_PIPS = 100
 
 
 # ============================================================
-# ESTADO CTRADER
+# ESTADO
 # ============================================================
 
 ctrader_client = None
@@ -80,65 +80,14 @@ conectado = False
 aplicacion_autenticada = False
 cuenta_autenticada = False
 
-heartbeat_loop = None
-
 
 # ============================================================
-# ESTADO DE SIMBOLOS
-# ============================================================
-
-nas100_confirmado = False
-xauusd_confirmado = False
-
-
-# ============================================================
-# CALCULO DE DISTANCIA
+# DISTANCIA SL / TP
 # ============================================================
 
 def calcular_distancia(pips):
+
     return int(round(pips * 100000))
-
-
-# ============================================================
-# HEARTBEAT
-# ============================================================
-
-def enviar_heartbeat():
-
-    global ctrader_client
-
-    try:
-
-        if ctrader_client is not None and conectado:
-
-            heartbeat = ProtoHeartbeatEvent()
-
-            ctrader_client.send(heartbeat)
-
-            print("CTRADER: HEARTBEAT ENVIADO")
-
-    except Exception as e:
-
-        print("CTRADER: ERROR EN HEARTBEAT:", e)
-
-
-def iniciar_heartbeat():
-
-    global heartbeat_loop
-
-    try:
-
-        if heartbeat_loop is None:
-
-            print("CTRADER: INICIANDO HEARTBEAT")
-
-            heartbeat_loop = LoopingCall(enviar_heartbeat)
-
-            heartbeat_loop.start(5.0, now=False)
-
-    except Exception as e:
-
-        print("CTRADER: ERROR INICIANDO HEARTBEAT:", e)
 
 
 # ============================================================
@@ -148,7 +97,6 @@ def iniciar_heartbeat():
 def abrir_operacion(symbol_id, volume, lado, nombre):
 
     global ctrader_client
-    global cuenta_autenticada
 
     print("================================")
     print("CTRADER: PREPARANDO ORDEN")
@@ -158,8 +106,9 @@ def abrir_operacion(symbol_id, volume, lado, nombre):
     print("VOLUMEN:", volume)
     print("================================")
 
+
     # --------------------------------------------------------
-    # VERIFICAR CONEXION
+    # CLIENTE
     # --------------------------------------------------------
 
     if ctrader_client is None:
@@ -168,16 +117,18 @@ def abrir_operacion(symbol_id, volume, lado, nombre):
 
         return
 
+
     # --------------------------------------------------------
-    # VERIFICAR CUENTA
+    # CUENTA
     # --------------------------------------------------------
 
     if not cuenta_autenticada:
 
-        print("CTRADER: CUENTA TODAVIA NO AUTENTICADA")
+        print("CTRADER: CUENTA NO AUTENTICADA")
         print("NO SE ENVIA LA ORDEN")
 
         return
+
 
     # --------------------------------------------------------
     # CREAR ORDEN
@@ -193,13 +144,16 @@ def abrir_operacion(symbol_id, volume, lado, nombre):
 
         orden.orderType = ProtoOAOrderType.MARKET
 
+
         if lado == "BUY":
 
             orden.tradeSide = ProtoOATradeSide.BUY
 
+
         elif lado == "SELL":
 
             orden.tradeSide = ProtoOATradeSide.SELL
+
 
         else:
 
@@ -207,17 +161,22 @@ def abrir_operacion(symbol_id, volume, lado, nombre):
 
             return
 
+
         orden.volume = volume
+
 
         orden.relativeStopLoss = calcular_distancia(
             STOP_LOSS_PIPS
         )
 
+
         orden.relativeTakeProfit = calcular_distancia(
             TAKE_PROFIT_PIPS
         )
 
+
         orden.label = "TV_" + nombre
+
 
         print("================================")
         print("CTRADER: ENVIANDO ORDEN")
@@ -230,7 +189,9 @@ def abrir_operacion(symbol_id, volume, lado, nombre):
         print("LABEL:", orden.label)
         print("================================")
 
+
         ctrader_client.send(orden)
+
 
     except Exception as e:
 
@@ -248,20 +209,22 @@ def procesar_alerta(mensaje):
 
     mensaje = mensaje.upper().strip()
 
+
     print("================================")
     print("CTRADER: PROCESANDO ALERTA")
     print("MENSAJE:", mensaje)
     print("================================")
 
 
-    # ========================================================
+    # --------------------------------------------------------
     # DIRECCION
-    # ========================================================
+    # --------------------------------------------------------
 
     es_compra = (
         "COMPRA" in mensaje
         or "BUY" in mensaje
     )
+
 
     es_venta = (
         "VENTA" in mensaje
@@ -269,9 +232,9 @@ def procesar_alerta(mensaje):
     )
 
 
-    # ========================================================
-    # EVITAR ALERTAS AMBIGUAS
-    # ========================================================
+    # --------------------------------------------------------
+    # ALERTA AMBIGUA
+    # --------------------------------------------------------
 
     if es_compra and es_venta:
 
@@ -282,9 +245,9 @@ def procesar_alerta(mensaje):
         return
 
 
-    # ========================================================
+    # --------------------------------------------------------
     # NASDAQ
-    # ========================================================
+    # --------------------------------------------------------
 
     es_nasdaq = (
         "NASDAQ" in mensaje
@@ -298,12 +261,14 @@ def procesar_alerta(mensaje):
 
             print("CTRADER: ALERTA COMPRA NASDAQ")
 
+
             abrir_operacion(
                 NASDAQ_SYMBOL_ID,
                 NASDAQ_VOLUME,
                 "BUY",
                 "NAS100"
             )
+
 
             return
 
@@ -312,12 +277,14 @@ def procesar_alerta(mensaje):
 
             print("CTRADER: ALERTA VENTA NASDAQ")
 
+
             abrir_operacion(
                 NASDAQ_SYMBOL_ID,
                 NASDAQ_VOLUME,
                 "SELL",
                 "NAS100"
             )
+
 
             return
 
@@ -327,9 +294,9 @@ def procesar_alerta(mensaje):
         return
 
 
-    # ========================================================
+    # --------------------------------------------------------
     # XAUUSD
-    # ========================================================
+    # --------------------------------------------------------
 
     es_xauusd = (
         "XAUUSD" in mensaje
@@ -343,12 +310,14 @@ def procesar_alerta(mensaje):
 
             print("CTRADER: ALERTA COMPRA XAUUSD")
 
+
             abrir_operacion(
                 XAUUSD_SYMBOL_ID,
                 XAUUSD_VOLUME,
                 "BUY",
                 "XAUUSD"
             )
+
 
             return
 
@@ -357,12 +326,14 @@ def procesar_alerta(mensaje):
 
             print("CTRADER: ALERTA VENTA XAUUSD")
 
+
             abrir_operacion(
                 XAUUSD_SYMBOL_ID,
                 XAUUSD_VOLUME,
                 "SELL",
                 "XAUUSD"
             )
+
 
             return
 
@@ -371,10 +342,6 @@ def procesar_alerta(mensaje):
 
         return
 
-
-    # ========================================================
-    # SIMBOLO NO RECONOCIDO
-    # ========================================================
 
     print("CTRADER: SIMBOLO NO RECONOCIDO")
 
@@ -388,12 +355,15 @@ def webhook():
 
     mensaje = request.get_data(as_text=True)
 
+
     print("================================")
     print("WEBHOOK RECIBIDO")
     print("Mensaje recibido:", mensaje)
     print("================================")
 
+
     procesar_alerta(mensaje)
+
 
     return "Webhook recibido correctamente", 200
 
@@ -426,19 +396,12 @@ def mensaje_recibido(client, message):
 
     global aplicacion_autenticada
     global cuenta_autenticada
-    global nas100_confirmado
-    global xauusd_confirmado
 
+
+    print("================================")
     print("CTRADER: MENSAJE RECIBIDO")
-
-
-    # ========================================================
-    # HEARTBEAT
-    # ========================================================
-
-    if message.payloadType == ProtoHeartbeatEvent().payloadType:
-
-        return
+    print("PAYLOAD TYPE:", message.payloadType)
+    print("================================")
 
 
     # ========================================================
@@ -449,13 +412,17 @@ def mensaje_recibido(client, message):
 
         aplicacion_autenticada = True
 
+
         print("CTRADER: APLICACION AUTENTICADA")
+
 
         request = ProtoOATraderReq()
 
         request.ctidTraderAccountId = ACCOUNT_ID
 
+
         print("CTRADER: SOLICITANDO CUENTAS")
+
 
         client.send(request)
 
@@ -463,20 +430,25 @@ def mensaje_recibido(client, message):
 
 
     # ========================================================
-    # CUENTA ENCONTRADA
+    # RESPUESTA DE CUENTA
     # ========================================================
 
     if message.payloadType == ProtoOATraderRes().payloadType:
 
         respuesta = Protobuf.extract(message)
 
+
         print("================================")
         print("CUENTA ENCONTRADA")
-        print("ACCOUNT ID:",
-              respuesta.trader.ctidTraderAccountId)
+        print(
+            "ACCOUNT ID:",
+            respuesta.trader.ctidTraderAccountId
+        )
 
-        print("TRADER LOGIN:",
-              respuesta.trader.login)
+        print(
+            "TRADER LOGIN:",
+            respuesta.trader.login
+        )
 
         print("================================")
 
@@ -497,7 +469,9 @@ def mensaje_recibido(client, message):
 
         auth.accessToken = CTRADER_ACCESS_TOKEN
 
+
         print("CTRADER: AUTENTICANDO CUENTA")
+
 
         client.send(auth)
 
@@ -512,16 +486,18 @@ def mensaje_recibido(client, message):
 
         cuenta_autenticada = True
 
+
         print("================================")
         print("CUENTA CTRADER AUTENTICADA")
         print("ACCOUNT ID:", ACCOUNT_ID)
         print("================================")
 
-        print("NAS100 ID:", NASDAQ_SYMBOL_ID)
-        print("XAUUSD ID:", XAUUSD_SYMBOL_ID)
+
+        print("CTRADER: CUENTA LISTA PARA OPERAR")
+
 
         # ----------------------------------------------------
-        # SOLICITAR NAS100
+        # SOLICITAR DATOS NAS100
         # ----------------------------------------------------
 
         req_nasdaq = ProtoOASymbolByIdReq()
@@ -534,7 +510,7 @@ def mensaje_recibido(client, message):
 
 
         # ----------------------------------------------------
-        # SOLICITAR XAUUSD
+        # SOLICITAR DATOS XAUUSD
         # ----------------------------------------------------
 
         req_xauusd = ProtoOASymbolByIdReq()
@@ -550,16 +526,10 @@ def mensaje_recibido(client, message):
             "CTRADER: SOLICITANDO DATOS DE NAS100 Y XAUUSD"
         )
 
+
         client.send(req_nasdaq)
 
         client.send(req_xauusd)
-
-
-        # ----------------------------------------------------
-        # HEARTBEAT
-        # ----------------------------------------------------
-
-        iniciar_heartbeat()
 
         return
 
@@ -571,6 +541,7 @@ def mensaje_recibido(client, message):
     if message.payloadType == ProtoOASymbolByIdRes().payloadType:
 
         respuesta = Protobuf.extract(message)
+
 
         print("================================")
         print("DATOS DE LOS SIMBOLOS")
@@ -588,13 +559,7 @@ def mensaje_recibido(client, message):
             print("PIP POSITION:", simbolo.pipPosition)
 
 
-            # ------------------------------------------------
-            # NAS100
-            # ------------------------------------------------
-
             if simbolo.symbolId == NASDAQ_SYMBOL_ID:
-
-                nas100_confirmado = True
 
                 print("--------------------------------")
                 print("NAS100 CONFIRMADO")
@@ -604,13 +569,7 @@ def mensaje_recibido(client, message):
                 print("PIP POSITION:", simbolo.pipPosition)
 
 
-            # ------------------------------------------------
-            # XAUUSD
-            # ------------------------------------------------
-
             if simbolo.symbolId == XAUUSD_SYMBOL_ID:
-
-                xauusd_confirmado = True
 
                 print("--------------------------------")
                 print("XAUUSD CONFIRMADO")
@@ -620,23 +579,21 @@ def mensaje_recibido(client, message):
                 print("PIP POSITION:", simbolo.pipPosition)
 
 
-        if nas100_confirmado and xauusd_confirmado:
-
-            print("================================")
-            print("NAS100 Y XAUUSD LISTOS PARA OPERAR")
-            print("================================")
-
+        print("================================")
+        print("NAS100 Y XAUUSD LISTOS PARA OPERAR")
+        print("================================")
 
         return
 
 
     # ========================================================
-    # EJECUCION DE ORDEN
+    # EVENTO DE EJECUCION
     # ========================================================
 
     if message.payloadType == ProtoOAExecutionEvent().payloadType:
 
         respuesta = Protobuf.extract(message)
+
 
         print("================================")
         print("CTRADER: EVENTO DE EJECUCION")
@@ -656,16 +613,20 @@ def mensaje_recibido(client, message):
 
             posicion = respuesta.position
 
-            print("POSITION ID:",
-                  posicion.positionId)
+            print(
+                "POSITION ID:",
+                posicion.positionId
+            )
 
 
         if respuesta.HasField("deal"):
 
             deal = respuesta.deal
 
-            print("DEAL ID:",
-                  deal.dealId)
+            print(
+                "DEAL ID:",
+                deal.dealId
+            )
 
 
         print("================================")
@@ -681,20 +642,22 @@ def mensaje_recibido(client, message):
 
         respuesta = Protobuf.extract(message)
 
+
         print("================================")
         print("CTRADER: ERROR DE ORDEN")
         print("ERROR CODE:", respuesta.errorCode)
         print("DESCRIPTION:", respuesta.description)
         print("================================")
 
+
         return
 
 
     # ========================================================
-    # OTROS MENSAJES
+    # OTRO MENSAJE
     # ========================================================
 
-    print("CTRADER: OTRO MENSAJE RECIBIDO")
+    print("CTRADER: TIPO DE MENSAJE NO IDENTIFICADO")
 
 
 # ============================================================
@@ -706,9 +669,11 @@ def conectado_callback(client):
     global ctrader_client
     global conectado
 
+
     ctrader_client = client
 
     conectado = True
+
 
     print("================================")
     print("CTRADER: CONECTADO")
@@ -721,7 +686,9 @@ def conectado_callback(client):
 
     request.clientSecret = CTRADER_CLIENT_SECRET
 
+
     print("CTRADER: ENVIANDO AUTENTICACION")
+
 
     client.send(request)
 
@@ -733,11 +700,16 @@ def conectado_callback(client):
 def desconectado_callback(client, reason):
 
     global conectado
+    global aplicacion_autenticada
     global cuenta_autenticada
+
 
     conectado = False
 
+    aplicacion_autenticada = False
+
     cuenta_autenticada = False
+
 
     print("================================")
     print("CTRADER: DESCONECTADO")
@@ -753,13 +725,14 @@ def iniciar_ctrader():
 
     global ctrader_client
 
+
     print("================================")
     print("INICIANDO CTRADER")
     print("================================")
 
 
     # --------------------------------------------------------
-    # COMPROBAR VARIABLES
+    # VARIABLES
     # --------------------------------------------------------
 
     if not CTRADER_CLIENT_ID:
@@ -785,63 +758,88 @@ def iniciar_ctrader():
 
     print("CTRADER: VARIABLES ENCONTRADAS")
 
-    print("CTRADER: CREANDO CLIENTE DEMO")
-
 
     # --------------------------------------------------------
-    # CLIENTE DEMO
+    # CONEXION DEMO
     # --------------------------------------------------------
 
-    ctrader_client = Client(
-        EndPoints.PROTOBUF_DEMO_HOST,
-        EndPoints.PROTOBUF_PORT,
-        TcpProtocol
-    )
+    while True:
+
+        try:
+
+            print("CTRADER: CREANDO CLIENTE DEMO")
 
 
-    print("CTRADER: CLIENTE CREADO")
+            ctrader_client = Client(
+                EndPoints.PROTOBUF_DEMO_HOST,
+                EndPoints.PROTOBUF_PORT,
+                TcpProtocol
+            )
 
 
-    # --------------------------------------------------------
-    # CALLBACKS
-    # --------------------------------------------------------
-
-    ctrader_client.setConnectedCallback(
-        conectado_callback
-    )
-
-    ctrader_client.setDisconnectedCallback(
-        desconectado_callback
-    )
-
-    ctrader_client.setMessageReceivedCallback(
-        mensaje_recibido
-    )
+            print("CTRADER: CLIENTE CREADO")
 
 
-    print("CTRADER: CALLBACKS CONFIGURADOS")
+            # ------------------------------------------------
+            # CALLBACKS
+            # ------------------------------------------------
+
+            ctrader_client.setConnectedCallback(
+                conectado_callback
+            )
 
 
-    # --------------------------------------------------------
-    # SERVICIO
-    # --------------------------------------------------------
-
-    print("CTRADER: INICIANDO SERVICIO")
-
-    ctrader_client.startService()
-
-    print("CTRADER: SERVICIO INICIADO")
+            ctrader_client.setDisconnectedCallback(
+                desconectado_callback
+            )
 
 
-    # --------------------------------------------------------
-    # REACTOR
-    # --------------------------------------------------------
+            ctrader_client.setMessageReceivedCallback(
+                mensaje_recibido
+            )
 
-    reactor.run()
+
+            print("CTRADER: CALLBACKS CONFIGURADOS")
+
+
+            # ------------------------------------------------
+            # SERVICIO
+            # ------------------------------------------------
+
+            print("CTRADER: INICIANDO SERVICIO")
+
+
+            ctrader_client.startService()
+
+
+            print("CTRADER: SERVICIO INICIADO")
+
+
+            # ------------------------------------------------
+            # REACTOR
+            # ------------------------------------------------
+
+            if not reactor.running:
+
+                reactor.run()
+
+
+        except Exception as e:
+
+            print("================================")
+            print("CTRADER: ERROR DE CONEXION")
+            print(e)
+            print("================================")
+
+
+        print("CTRADER: REINTENTO EN 10 SEGUNDOS")
+
+
+        time.sleep(10)
 
 
 # ============================================================
-# INICIAR CTRADER EN SEGUNDO PLANO
+# INICIAR HILO CTRADER
 # ============================================================
 
 threading.Thread(
