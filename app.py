@@ -62,7 +62,6 @@ def mensaje_recibido(client, message):
             print("ACCOUNT ID:", cuenta.ctidTraderAccountId)
             print("TRADER LOGIN:", cuenta.traderLogin)
             print("ES LIVE:", cuenta.isLive)
-            print("BROKER:", cuenta.brokerName)
             print("--------------------------------")
 
         print("================================")
