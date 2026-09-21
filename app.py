@@ -16,12 +16,12 @@ ACCESS_TOKEN = os.getenv("CTRADER_ACCESS_TOKEN")
 
 ACCOUNT_ID = 48481130
 
-# Primera prueba
 SYMBOL_NAME = "XAUUSD"
 VOLUME_LOTS = 0.01
 
 ctrader_client = None
 cuenta_autenticada = False
+
 xauusd_symbol_id = None
 xauusd_lot_size = None
 xauusd_min_volume = None
@@ -49,44 +49,251 @@ def desconectado(client, reason):
     print("================================")
 
 
+def mensaje_recibido(client, message):
+    global cuenta_autenticada
+    global xauusd_symbol_id
+    global xauusd_lot_size
+    global xauusd_min_volume
+    global xauusd_step_volume
+    global ctrader_client
+
+    ctrader_client = client
+
+    print("CTRADER: MENSAJE RECIBIDO")
+
+    # -----------------------------------------
+    # AUTENTICACION DE LA APLICACION
+    # -----------------------------------------
+
+    if message.payloadType == ProtoOAApplicationAuthRes().payloadType:
+
+        print("CTRADER: APLICACION AUTENTICADA")
+
+        cuentas = ProtoOAGetAccountListByAccessTokenReq()
+        cuentas.accessToken = ACCESS_TOKEN
+
+        print("CTRADER: SOLICITANDO CUENTAS")
+
+        client.send(cuentas)
+
+    # -----------------------------------------
+    # LISTA DE CUENTAS
+    # -----------------------------------------
+
+    elif message.payloadType == ProtoOAGetAccountListByAccessTokenRes().payloadType:
+
+        respuesta = Protobuf.extract(message)
+
+        for cuenta in respuesta.ctidTraderAccount:
+
+            print("================================")
+            print("CUENTA ENCONTRADA")
+            print("ACCOUNT ID:", cuenta.ctidTraderAccountId)
+            print("TRADER LOGIN:", cuenta.traderLogin)
+            print("ES LIVE:", cuenta.isLive)
+            print("================================")
+
+            if cuenta.ctidTraderAccountId == ACCOUNT_ID:
+
+                print("CUENTA CORRECTA ENCONTRADA")
+                print("ACCOUNT ID:", ACCOUNT_ID)
+                print("TRADER LOGIN:", cuenta.traderLogin)
+
+                auth_cuenta = ProtoOAAccountAuthReq()
+                auth_cuenta.ctidTraderAccountId = ACCOUNT_ID
+                auth_cuenta.accessToken = ACCESS_TOKEN
+
+                print("CTRADER: AUTENTICANDO CUENTA")
+
+                client.send(auth_cuenta)
+
+    # -----------------------------------------
+    # CUENTA AUTENTICADA
+    # -----------------------------------------
+
+    elif message.payloadType == ProtoOAAccountAuthRes().payloadType:
+
+        cuenta_autenticada = True
+
+        print("================================")
+        print("CUENTA CTRADER AUTENTICADA")
+        print("ACCOUNT ID:", ACCOUNT_ID)
+        print("================================")
+
+        simbolos = ProtoOASymbolsListReq()
+        simbolos.ctidTraderAccountId = ACCOUNT_ID
+        simbolos.includeArchivedSymbols = False
+
+        print("CTRADER: SOLICITANDO SIMBOLOS")
+
+        client.send(simbolos)
+
+    # -----------------------------------------
+    # LISTA DE SIMBOLOS
+    # -----------------------------------------
+
+    elif message.payloadType == ProtoOASymbolsListRes().payloadType:
+
+        respuesta = Protobuf.extract(message)
+
+        print("================================")
+        print("BUSCANDO XAUUSD")
+        print("================================")
+
+        encontrado = False
+
+        for simbolo in respuesta.symbol:
+
+            nombre = simbolo.symbolName
+
+            if nombre and nombre.upper().replace("/", "") == "XAUUSD":
+
+                encontrado = True
+
+                xauusd_symbol_id = simbolo.symbolId
+
+                print("XAUUSD ENCONTRADO")
+                print("NOMBRE:", nombre)
+                print("SYMBOL ID:", xauusd_symbol_id)
+
+                detalle = ProtoOASymbolByIdReq()
+                detalle.ctidTraderAccountId = ACCOUNT_ID
+                detalle.symbolId.append(xauusd_symbol_id)
+
+                print("CTRADER: SOLICITANDO DATOS COMPLETOS DE XAUUSD")
+
+                client.send(detalle)
+
+                break
+
+        if not encontrado:
+
+            print("================================")
+            print("ERROR: NO SE ENCONTRO XAUUSD")
+            print("================================")
+
+    # -----------------------------------------
+    # DATOS COMPLETOS DEL SIMBOLO
+    # -----------------------------------------
+
+    elif message.payloadType == ProtoOASymbolByIdRes().payloadType:
+
+        respuesta = Protobuf.extract(message)
+
+        for simbolo in respuesta.symbol:
+
+            if simbolo.symbolId == xauusd_symbol_id:
+
+                xauusd_lot_size = simbolo.lotSize
+                xauusd_min_volume = simbolo.minVolume
+                xauusd_step_volume = simbolo.stepVolume
+
+                print("================================")
+                print("DATOS COMPLETOS XAUUSD")
+                print("================================")
+
+                print("SYMBOL ID:", simbolo.symbolId)
+                print("LOT SIZE:", xauusd_lot_size)
+                print("MIN VOLUME:", xauusd_min_volume)
+                print("STEP VOLUME:", xauusd_step_volume)
+
+                print("================================")
+                print("XAUUSD LISTO PARA PRUEBA DEMO")
+                print("================================")
+
+                print("LA ORDEN SOLO SE ENVIARA AL RECIBIR:")
+                print("PRUEBA XAUUSD")
+
+    # -----------------------------------------
+    # EVENTO DE EJECUCION
+    # -----------------------------------------
+
+    elif message.payloadType == ProtoOAExecutionEvent().payloadType:
+
+        respuesta = Protobuf.extract(message)
+
+        print("================================")
+        print("EVENTO DE EJECUCION CTRADER")
+        print("EXECUTION TYPE:", respuesta.executionType)
+        print("================================")
+
+        if respuesta.HasField("position"):
+            print("POSITION ID:", respuesta.position.positionId)
+
+        if respuesta.HasField("order"):
+            print("ORDER ID:", respuesta.order.orderId)
+
+        if respuesta.HasField("deal"):
+            print("DEAL ID:", respuesta.deal.dealId)
+
+    # -----------------------------------------
+    # ERROR DE ORDEN
+    # -----------------------------------------
+
+    elif message.payloadType == ProtoOAOrderErrorEvent().payloadType:
+
+        respuesta = Protobuf.extract(message)
+
+        print("================================")
+        print("ERROR DE ORDEN CTRADER")
+        print("ERROR CODE:", respuesta.errorCode)
+
+        if respuesta.HasField("description"):
+            print("DESCRIPCION:", respuesta.description)
+
+        print("================================")
+
+    else:
+
+        print("CTRADER: OTRO MENSAJE RECIBIDO")
+
+
 def enviar_orden_xauusd():
+
     global xauusd_symbol_id
     global xauusd_lot_size
     global xauusd_min_volume
     global xauusd_step_volume
 
     if not cuenta_autenticada:
+
         print("ERROR: LA CUENTA CTRADER NO ESTA AUTENTICADA")
         return
 
     if xauusd_symbol_id is None:
+
         print("ERROR: XAUUSD TODAVIA NO TIENE SYMBOL ID")
         return
 
     if xauusd_lot_size is None:
+
         print("ERROR: NO SE CONOCE EL LOT SIZE DE XAUUSD")
         return
 
-    # cTrader expresa lotSize en centésimas de unidad.
-    # Convertimos 0.01 lote a volumen de protocolo.
     volumen = int(round(xauusd_lot_size * VOLUME_LOTS))
 
     print("================================")
     print("PREPARANDO ORDEN DEMO")
+    print("================================")
+
     print("SIMBOLO:", SYMBOL_NAME)
     print("SYMBOL ID:", xauusd_symbol_id)
     print("LOTES:", VOLUME_LOTS)
     print("VOLUMEN PROTOCOLO:", volumen)
     print("MIN VOLUME:", xauusd_min_volume)
     print("STEP VOLUME:", xauusd_step_volume)
-    print("================================")
 
-    if xauusd_min_volume is not None and volumen < xauusd_min_volume:
-        print("ERROR: EL VOLUMEN ES MENOR AL MINIMO PERMITIDO")
-        return
+    if xauusd_min_volume is not None:
+
+        if volumen < xauusd_min_volume:
+
+            print("ERROR: EL VOLUMEN ES MENOR AL MINIMO PERMITIDO")
+            return
 
     if xauusd_step_volume is not None:
+
         if volumen % xauusd_step_volume != 0:
+
             print("ERROR: EL VOLUMEN NO RESPETA EL STEP DEL SIMBOLO")
             return
 
@@ -107,166 +314,6 @@ def enviar_orden_xauusd():
     ctrader_client.send(orden)
 
 
-def mensaje_recibido(client, message):
-    global cuenta_autenticada
-    global xauusd_symbol_id
-    global xauusd_lot_size
-    global xauusd_min_volume
-    global xauusd_step_volume
-    global ctrader_client
-
-    ctrader_client = client
-
-    print("CTRADER: MENSAJE RECIBIDO")
-
-    if message.payloadType == ProtoOAApplicationAuthRes().payloadType:
-
-        print("CTRADER: APLICACION AUTENTICADA")
-
-        cuentas = ProtoOAGetAccountListByAccessTokenReq()
-        cuentas.accessToken = ACCESS_TOKEN
-
-        print("CTRADER: SOLICITANDO CUENTAS")
-
-        client.send(cuentas)
-
-    elif message.payloadType == ProtoOAGetAccountListByAccessTokenRes().payloadType:
-
-        respuesta = Protobuf.extract(message)
-
-        for cuenta in respuesta.ctidTraderAccount:
-
-            print("================================")
-            print("CUENTA ENCONTRADA")
-            print("ACCOUNT ID:", cuenta.ctidTraderAccountId)
-            print("TRADER LOGIN:", cuenta.traderLogin)
-            print("ES LIVE:", cuenta.isLive)
-            print("================================")
-
-            if cuenta.ctidTraderAccountId == ACCOUNT_ID:
-
-                print("CUENTA CORRECTA ENCONTRADA")
-
-                auth_cuenta = ProtoOAAccountAuthReq()
-                auth_cuenta.ctidTraderAccountId = ACCOUNT_ID
-                auth_cuenta.accessToken = ACCESS_TOKEN
-
-                print("CTRADER: AUTENTICANDO CUENTA")
-
-                client.send(auth_cuenta)
-
-    elif message.payloadType == ProtoOAAccountAuthRes().payloadType:
-
-        cuenta_autenticada = True
-
-        print("================================")
-        print("CUENTA CTRADER AUTENTICADA")
-        print("ACCOUNT ID:", ACCOUNT_ID)
-        print("================================")
-
-        simbolos = ProtoOASymbolsListReq()
-        simbolos.ctidTraderAccountId = ACCOUNT_ID
-        simbolos.includeArchivedSymbols = False
-
-        print("CTRADER: SOLICITANDO SIMBOLOS")
-
-        client.send(simbolos)
-
-    elif message.payloadType == ProtoOASymbolsListRes().payloadType:
-
-        respuesta = Protobuf.extract(message)
-
-        print("================================")
-        print("BUSCANDO XAUUSD")
-        print("================================")
-
-        encontrado = False
-
-        for simbolo in respuesta.symbol:
-
-            nombre = simbolo.symbolName
-
-            if nombre and nombre.upper().replace("/", "") == "XAUUSD":
-
-                encontrado = True
-                xauusd_symbol_id = simbolo.symbolId
-
-                print("XAUUSD ENCONTRADO")
-                print("NOMBRE:", nombre)
-                print("SYMBOL ID:", xauusd_symbol_id)
-
-                detalle = ProtoOASymbolByIdReq()
-                detalle.ctidTraderAccountId = ACCOUNT_ID
-                detalle.symbolId.append(xauusd_symbol_id)
-
-                print("CTRADER: SOLICITANDO DATOS COMPLETOS DE XAUUSD")
-
-                client.send(detalle)
-
-                break
-
-        if not encontrado:
-            print("ERROR: NO SE ENCONTRO XAUUSD")
-
-    elif message.payloadType == ProtoOASymbolByIdRes().payloadType:
-
-        respuesta = Protobuf.extract(message)
-
-        for simbolo in respuesta.symbol:
-
-            if simbolo.symbolId == xauusd_symbol_id:
-
-                xauusd_lot_size = simbolo.lotSize
-                xauusd_min_volume = simbolo.minVolume
-                xauusd_step_volume = simbolo.stepVolume
-
-                print("================================")
-                print("DATOS COMPLETOS XAUUSD")
-                print("SYMBOL ID:", simbolo.symbolId)
-                print("LOT SIZE:", xauusd_lot_size)
-                print("MIN VOLUME:", xauusd_min_volume)
-                print("STEP VOLUME:", xauusd_step_volume)
-                print("================================")
-
-                print("XAUUSD LISTO PARA PRUEBA DEMO")
-                print("LA ORDEN SOLO SE ENVIARA AL RECIBIR:")
-                print("PRUEBA XAUUSD")
-
-    elif message.payloadType == ProtoOAExecutionEvent().payloadType:
-
-        respuesta = Protobuf.extract(message)
-
-        print("================================")
-        print("EVENTO DE EJECUCION CTRADER")
-        print("EXECUTION TYPE:", respuesta.executionType)
-        print("================================")
-
-        if respuesta.HasField("position"):
-            print("POSITION ID:", respuesta.position.positionId)
-
-        if respuesta.HasField("order"):
-            print("ORDER ID:", respuesta.order.orderId)
-
-        if respuesta.HasField("deal"):
-            print("DEAL ID:", respuesta.deal.dealId)
-
-    elif message.payloadType == ProtoOAOrderErrorEvent().payloadType:
-
-        respuesta = Protobuf.extract(message)
-
-        print("================================")
-        print("ERROR DE ORDEN CTRADER")
-        print("ERROR CODE:", respuesta.errorCode)
-
-        if respuesta.HasField("description"):
-            print("DESCRIPCION:", respuesta.description)
-
-        print("================================")
-
-    else:
-        print("CTRADER: OTRO MENSAJE RECIBIDO")
-
-
 def iniciar_ctrader():
 
     global ctrader_client
@@ -276,14 +323,17 @@ def iniciar_ctrader():
     print("================================")
 
     if not CLIENT_ID:
+
         print("ERROR: falta CTRADER_CLIENT_ID")
         return
 
     if not CLIENT_SECRET:
+
         print("ERROR: falta CTRADER_CLIENT_SECRET")
         return
 
     if not ACCESS_TOKEN:
+
         print("ERROR: falta CTRADER_ACCESS_TOKEN")
         return
 
@@ -316,11 +366,13 @@ def iniciar_ctrader():
 
 @app.route("/")
 def home():
+
     return "Servidor funcionando correctamente"
 
 
 @app.route("/status")
 def status():
+
     return "OK"
 
 
