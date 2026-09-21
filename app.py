@@ -14,6 +14,8 @@ CLIENT_ID = os.getenv("CTRADER_CLIENT_ID")
 CLIENT_SECRET = os.getenv("CTRADER_CLIENT_SECRET")
 ACCESS_TOKEN = os.getenv("CTRADER_ACCESS_TOKEN")
 
+ACCOUNT_ID = 48481130
+
 
 def conectado(client):
     print("================================")
@@ -40,40 +42,62 @@ def mensaje_recibido(client, message):
     print("CTRADER: MENSAJE RECIBIDO")
 
     if message.payloadType == ProtoOAApplicationAuthRes().payloadType:
+
         print("CTRADER: APLICACION AUTENTICADA")
 
         cuentas = ProtoOAGetAccountListByAccessTokenReq()
         cuentas.accessToken = ACCESS_TOKEN
 
-        print("CTRADER: SOLICITANDO TODAS LAS CUENTAS")
+        print("CTRADER: SOLICITANDO CUENTAS")
 
         client.send(cuentas)
 
     elif message.payloadType == ProtoOAGetAccountListByAccessTokenRes().payloadType:
+
         respuesta = Protobuf.extract(message)
 
         print("================================")
-        print("CTRADER: CUENTAS RECIBIDAS")
-        print("CANTIDAD DE CUENTAS:", len(respuesta.ctidTraderAccount))
+        print("CTRADER: CUENTA ENCONTRADA")
         print("================================")
 
         for cuenta in respuesta.ctidTraderAccount:
-            print("--------------------------------")
+
             print("ACCOUNT ID:", cuenta.ctidTraderAccountId)
             print("TRADER LOGIN:", cuenta.traderLogin)
             print("ES LIVE:", cuenta.isLive)
-            print("--------------------------------")
+
+            if cuenta.ctidTraderAccountId == ACCOUNT_ID:
+
+                print("================================")
+                print("CUENTA CORRECTA ENCONTRADA")
+                print("ACCOUNT ID:", ACCOUNT_ID)
+                print("TRADER LOGIN:", cuenta.traderLogin)
+                print("================================")
+
+                auth_cuenta = ProtoOAAccountAuthReq()
+                auth_cuenta.ctidTraderAccountId = ACCOUNT_ID
+                auth_cuenta.accessToken = ACCESS_TOKEN
+
+                print("CTRADER: AUTENTICANDO CUENTA")
+
+                client.send(auth_cuenta)
+
+    elif message.payloadType == ProtoOAAccountAuthRes().payloadType:
 
         print("================================")
-        print("NO SE AUTENTICARA NINGUNA CUENTA")
-        print("ESTA PRUEBA NO ABRE OPERACIONES")
+        print("CUENTA CTRADER AUTENTICADA")
+        print("ACCOUNT ID:", ACCOUNT_ID)
         print("================================")
+
+        print("NO SE ABRIRAN OPERACIONES")
+        print("CUENTA LISTA PARA LA SIGUIENTE PRUEBA")
 
     else:
         print("CTRADER: OTRO MENSAJE RECIBIDO")
 
 
 def iniciar_ctrader():
+
     print("================================")
     print("INICIANDO CTRADER")
     print("================================")
@@ -127,10 +151,12 @@ def status():
 
 @app.route("/webhook", methods=["POST"])
 def webhook():
+
     print("================================")
     print("WEBHOOK RECIBIDO")
     print("Mensaje recibido:", request.get_data(as_text=True))
     print("================================")
+
     return "Webhook recibido correctamente"
 
 
