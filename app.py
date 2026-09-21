@@ -22,12 +22,14 @@ ACCESS_TOKEN = os.getenv("CTRADER_ACCESS_TOKEN")
 # CUENTA DEMO CONFIRMADA
 ACCOUNT_ID = 48481130
 
+
 # =========================================================
 # SIMBOLOS CONFIRMADOS
 # =========================================================
 
 NASDAQ_SYMBOL_ID = 10014
 XAUUSD_SYMBOL_ID = 41
+
 
 # =========================================================
 # VOLUMENES
@@ -48,7 +50,7 @@ XAUUSD_VOLUME = 100
 
 
 # =========================================================
-# SL / TP
+# STOP LOSS / TAKE PROFIT
 # =========================================================
 
 STOP_LOSS_PIPS = 50
@@ -176,17 +178,14 @@ def mensaje_recibido(client, message):
         print("ACCOUNT ID:", ACCOUNT_ID)
         print("================================")
 
-        print("NAS100 ID:", NASDAQ_SYMBOL_ID)
-        print("XAUUSD ID:", XAUUSD_SYMBOL_ID)
-
-        print("CTRADER: SOLICITANDO DATOS DE NAS100 Y XAUUSD")
-
         detalle = ProtoOASymbolByIdReq()
 
         detalle.ctidTraderAccountId = ACCOUNT_ID
 
         detalle.symbolId.append(NASDAQ_SYMBOL_ID)
         detalle.symbolId.append(XAUUSD_SYMBOL_ID)
+
+        print("CTRADER: SOLICITANDO DATOS DE NAS100 Y XAUUSD")
 
         client.send(detalle)
 
@@ -203,7 +202,6 @@ def mensaje_recibido(client, message):
         print("DATOS DE LOS SIMBOLOS")
         print("================================")
 
-
         for simbolo in respuesta.symbol:
 
             print("--------------------------------")
@@ -211,8 +209,13 @@ def mensaje_recibido(client, message):
             print("LOT SIZE:", simbolo.lotSize)
             print("MIN VOLUME:", simbolo.minVolume)
             print("STEP VOLUME:", simbolo.stepVolume)
-            print("DIGITS:", simbolo.digits)
-            print("PIP POSITION:", simbolo.pipPosition)
+
+            if hasattr(simbolo, "digits"):
+                print("DIGITS:", simbolo.digits)
+
+            if hasattr(simbolo, "pipPosition"):
+                print("PIP POSITION:", simbolo.pipPosition)
+
             print("--------------------------------")
 
 
@@ -222,7 +225,9 @@ def mensaje_recibido(client, message):
 
             if simbolo.symbolId == NASDAQ_SYMBOL_ID:
 
-                nasdaq_pip_position = simbolo.pipPosition
+                if hasattr(simbolo, "pipPosition"):
+
+                    nasdaq_pip_position = simbolo.pipPosition
 
                 nasdaq_listo = True
 
@@ -239,7 +244,9 @@ def mensaje_recibido(client, message):
 
             elif simbolo.symbolId == XAUUSD_SYMBOL_ID:
 
-                xauusd_pip_position = simbolo.pipPosition
+                if hasattr(simbolo, "pipPosition"):
+
+                    xauusd_pip_position = simbolo.pipPosition
 
                 xauusd_listo = True
 
@@ -264,18 +271,124 @@ def mensaje_recibido(client, message):
 
 
     # =====================================================
-    # RESPUESTA DE NUEVA ORDEN
+    # EVENTO DE EJECUCION DE ORDEN
     # =====================================================
 
-    elif message.payloadType == ProtoOANewOrderRes().payloadType:
+    elif message.payloadType == ProtoOAExecutionEvent().payloadType:
 
         respuesta = Protobuf.extract(message)
 
         print("================================")
-        print("ORDEN ACEPTADA POR CTRADER")
+        print("CTRADER: EVENTO DE EJECUCION")
         print("================================")
 
-        print(respuesta)
+        print("EXECUTION TYPE:", respuesta.executionType)
+
+        # -------------------------------------------------
+        # ORDER
+        # -------------------------------------------------
+
+        if respuesta.HasField("order"):
+
+            orden = respuesta.order
+
+            print("ORDER ID:", orden.orderId)
+            print("ORDER STATUS:", orden.orderStatus)
+
+            if orden.HasField("executionPrice"):
+
+                print(
+                    "PRECIO DE EJECUCION:",
+                    orden.executionPrice
+                )
+
+            if orden.HasField("executedVolume"):
+
+                print(
+                    "VOLUMEN EJECUTADO:",
+                    orden.executedVolume
+                )
+
+            if orden.HasField("stopLoss"):
+
+                print(
+                    "STOP LOSS:",
+                    orden.stopLoss
+                )
+
+            if orden.HasField("takeProfit"):
+
+                print(
+                    "TAKE PROFIT:",
+                    orden.takeProfit
+                )
+
+
+        # -------------------------------------------------
+        # POSITION
+        # -------------------------------------------------
+
+        if respuesta.HasField("position"):
+
+            posicion = respuesta.position
+
+            print(
+                "POSITION ID:",
+                posicion.positionId
+            )
+
+            if posicion.HasField("price"):
+
+                print(
+                    "PRECIO POSICION:",
+                    posicion.price
+                )
+
+            if posicion.HasField("stopLoss"):
+
+                print(
+                    "SL POSICION:",
+                    posicion.stopLoss
+                )
+
+            if posicion.HasField("takeProfit"):
+
+                print(
+                    "TP POSICION:",
+                    posicion.takeProfit
+                )
+
+
+        # -------------------------------------------------
+        # DEAL
+        # -------------------------------------------------
+
+        if respuesta.HasField("deal"):
+
+            deal = respuesta.deal
+
+            print(
+                "DEAL ID:",
+                deal.dealId
+            )
+
+            print(
+                "POSITION ID:",
+                deal.positionId
+            )
+
+            if deal.HasField("executionPrice"):
+
+                print(
+                    "PRECIO DEAL:",
+                    deal.executionPrice
+                )
+
+            print(
+                "DEAL STATUS:",
+                deal.dealStatus
+            )
+
 
         print("================================")
 
@@ -289,10 +402,17 @@ def mensaje_recibido(client, message):
         respuesta = Protobuf.extract(message)
 
         print("================================")
-        print("ERROR AL ABRIR OPERACION")
+        print("CTRADER: ERROR AL ABRIR ORDEN")
         print("================================")
 
-        print(respuesta)
+        print("ERROR CODE:", respuesta.errorCode)
+
+        if respuesta.HasField("description"):
+
+            print(
+                "DESCRIPCION:",
+                respuesta.description
+            )
 
         print("================================")
 
@@ -307,33 +427,16 @@ def mensaje_recibido(client, message):
 
 
 # =========================================================
-# CALCULAR DISTANCIA RELATIVA
+# CALCULAR DISTANCIA SL / TP
 # =========================================================
 
-def calcular_distancia_relativa(pips, pip_position):
+def calcular_distancia(pips):
 
-    if pip_position is None:
+    # cTrader expresa relativeStopLoss y
+    # relativeTakeProfit en 1/100000
+    # de unidad de precio.
 
-        return None
-
-    # Tamaño de 1 pip:
-    #
-    # pipPosition 1 -> 0.1
-    # pipPosition 2 -> 0.01
-    # pipPosition 4 -> 0.0001
-    #
-    # Distancia de precio = pips / 10^pipPosition
-    #
-    # cTrader relative distance:
-    # distancia de precio * 100000
-
-    distancia_precio = pips / (10 ** pip_position)
-
-    distancia_relativa = int(
-        round(distancia_precio * 100000)
-    )
-
-    return distancia_relativa
+    return int(round(pips * 100000))
 
 
 # =========================================================
@@ -344,9 +447,6 @@ def abrir_operacion(symbol_id, volume, direccion, nombre):
 
     global ctrader_client
     global cuenta_autenticada
-    global nasdaq_pip_position
-    global xauusd_pip_position
-
 
     print("================================")
     print("PREPARANDO OPERACION")
@@ -359,9 +459,9 @@ def abrir_operacion(symbol_id, volume, direccion, nombre):
     print("LOTES: 0.01")
 
 
-    # ---------------------------------------------
-    # Comprobar conexion
-    # ---------------------------------------------
+    # -----------------------------------------------------
+    # CONEXION
+    # -----------------------------------------------------
 
     if ctrader_client is None:
 
@@ -371,9 +471,9 @@ def abrir_operacion(symbol_id, volume, direccion, nombre):
         return
 
 
-    # ---------------------------------------------
-    # Comprobar cuenta
-    # ---------------------------------------------
+    # -----------------------------------------------------
+    # CUENTA
+    # -----------------------------------------------------
 
     if not cuenta_autenticada:
 
@@ -383,48 +483,18 @@ def abrir_operacion(symbol_id, volume, direccion, nombre):
         return
 
 
-    # ---------------------------------------------
-    # Obtener pip position
-    # ---------------------------------------------
+    # -----------------------------------------------------
+    # SL / TP
+    # -----------------------------------------------------
 
-    if symbol_id == NASDAQ_SYMBOL_ID:
-
-        pip_position = nasdaq_pip_position
-
-    elif symbol_id == XAUUSD_SYMBOL_ID:
-
-        pip_position = xauusd_pip_position
-
-    else:
-
-        print("ERROR: SYMBOL ID NO CONFIGURADO")
-        return
-
-
-    if pip_position is None:
-
-        print("ERROR: NO TENEMOS PIP POSITION DEL SIMBOLO")
-        print("NO SE ABRE LA OPERACION")
-
-        return
-
-
-    # ---------------------------------------------
-    # Calcular SL y TP
-    # ---------------------------------------------
-
-    relative_sl = calcular_distancia_relativa(
-        STOP_LOSS_PIPS,
-        pip_position
+    relative_sl = calcular_distancia(
+        STOP_LOSS_PIPS
     )
 
-    relative_tp = calcular_distancia_relativa(
-        TAKE_PROFIT_PIPS,
-        pip_position
+    relative_tp = calcular_distancia(
+        TAKE_PROFIT_PIPS
     )
 
-
-    print("PIP POSITION:", pip_position)
 
     print("STOP LOSS:", STOP_LOSS_PIPS, "PIPS")
     print("RELATIVE SL:", relative_sl)
@@ -435,9 +505,9 @@ def abrir_operacion(symbol_id, volume, direccion, nombre):
     print("================================")
 
 
-    # =================================================
+    # -----------------------------------------------------
     # CREAR ORDEN
-    # =================================================
+    # -----------------------------------------------------
 
     orden = ProtoOANewOrderReq()
 
@@ -448,9 +518,9 @@ def abrir_operacion(symbol_id, volume, direccion, nombre):
     orden.orderType = ProtoOAOrderType.MARKET
 
 
-    # ---------------------------------------------
+    # -----------------------------------------------------
     # DIRECCION
-    # ---------------------------------------------
+    # -----------------------------------------------------
 
     if direccion == "BUY":
 
@@ -463,38 +533,37 @@ def abrir_operacion(symbol_id, volume, direccion, nombre):
     else:
 
         print("ERROR: DIRECCION INVALIDA")
+
         return
 
 
-    # ---------------------------------------------
+    # -----------------------------------------------------
     # VOLUMEN
-    # ---------------------------------------------
+    # -----------------------------------------------------
 
     orden.volume = volume
 
 
-    # ---------------------------------------------
-    # STOP LOSS
-    # ---------------------------------------------
+    # -----------------------------------------------------
+    # SL / TP RELATIVOS
+    # -----------------------------------------------------
 
     orden.relativeStopLoss = relative_sl
-
-
-    # ---------------------------------------------
-    # TAKE PROFIT
-    # ---------------------------------------------
 
     orden.relativeTakeProfit = relative_tp
 
 
-    # ---------------------------------------------
+    # -----------------------------------------------------
     # LABEL
-    # ---------------------------------------------
+    # -----------------------------------------------------
 
     orden.label = "TV_" + nombre
 
 
+    print("================================")
     print("CTRADER: ENVIANDO ORDEN")
+    print("================================")
+
     print("ACTIVO:", nombre)
     print("DIRECCION:", direccion)
     print("VOLUMEN:", volume)
@@ -504,10 +573,18 @@ def abrir_operacion(symbol_id, volume, direccion, nombre):
     print("================================")
 
 
-    ctrader_client.send(orden)
+    try:
 
+        ctrader_client.send(orden)
 
-    print("CTRADER: ORDEN ENVIADA")
+        print("CTRADER: ORDEN ENVIADA CORRECTAMENTE")
+
+    except Exception as e:
+
+        print("================================")
+        print("ERROR ENVIANDO ORDEN")
+        print("ERROR:", e)
+        print("================================")
 
 
 # =========================================================
@@ -525,7 +602,7 @@ def procesar_alerta(mensaje):
 
 
     # =====================================================
-    # NASDAQ
+    # IDENTIFICAR ACTIVO
     # =====================================================
 
     es_nasdaq = (
@@ -534,10 +611,6 @@ def procesar_alerta(mensaje):
     )
 
 
-    # =====================================================
-    # ORO
-    # =====================================================
-
     es_oro = (
         "XAUUSD" in texto
         or "ORO" in texto
@@ -545,7 +618,7 @@ def procesar_alerta(mensaje):
 
 
     # =====================================================
-    # DIRECCION
+    # IDENTIFICAR DIRECCION
     # =====================================================
 
     es_compra = (
@@ -561,16 +634,21 @@ def procesar_alerta(mensaje):
 
 
     # =====================================================
-    # EVITAR ALERTAS AMBIGUAS
+    # ALERTA AMBIGUA
     # =====================================================
 
     if es_compra and es_venta:
 
-        print("ALERTA AMBIGUA: COMPRA Y VENTA")
+        print("ALERTA AMBIGUA")
+        print("CONTIENE COMPRA Y VENTA")
         print("NO SE ABRE NINGUNA OPERACION")
 
         return
 
+
+    # =====================================================
+    # SIN DIRECCION
+    # =====================================================
 
     if not es_compra and not es_venta:
 
@@ -588,7 +666,9 @@ def procesar_alerta(mensaje):
 
         if es_compra:
 
-            print("ALERTA NASDAQ COMPRA")
+            print("================================")
+            print("ALERTA NASDAQ: COMPRA")
+            print("================================")
 
             threading.Thread(
                 target=abrir_operacion,
@@ -606,7 +686,9 @@ def procesar_alerta(mensaje):
 
         if es_venta:
 
-            print("ALERTA NASDAQ VENTA")
+            print("================================")
+            print("ALERTA NASDAQ: VENTA")
+            print("================================")
 
             threading.Thread(
                 target=abrir_operacion,
@@ -623,14 +705,16 @@ def procesar_alerta(mensaje):
 
 
     # =====================================================
-    # XAUUSD / ORO
+    # ORO
     # =====================================================
 
     if es_oro:
 
         if es_compra:
 
-            print("ALERTA XAUUSD COMPRA")
+            print("================================")
+            print("ALERTA XAUUSD: COMPRA")
+            print("================================")
 
             threading.Thread(
                 target=abrir_operacion,
@@ -648,7 +732,9 @@ def procesar_alerta(mensaje):
 
         if es_venta:
 
-            print("ALERTA XAUUSD VENTA")
+            print("================================")
+            print("ALERTA XAUUSD: VENTA")
+            print("================================")
 
             threading.Thread(
                 target=abrir_operacion,
@@ -681,21 +767,18 @@ def webhook():
 
     mensaje = request.get_data(as_text=True).strip()
 
-
     print("================================")
     print("WEBHOOK RECIBIDO")
     print("MENSAJE RECIBIDO:", mensaje)
     print("================================")
 
-
     procesar_alerta(mensaje)
-
 
     return "Webhook recibido correctamente"
 
 
 # =========================================================
-# WEB
+# PAGINAS
 # =========================================================
 
 @app.route("/")
@@ -742,6 +825,7 @@ def iniciar_ctrader():
 
 
     print("CTRADER: VARIABLES ENCONTRADAS")
+
     print("CTRADER: CREANDO CLIENTE DEMO")
 
 
@@ -766,6 +850,7 @@ def iniciar_ctrader():
 
 
     print("CTRADER: CALLBACKS CONFIGURADOS")
+
     print("CTRADER: INICIANDO SERVICIO")
 
 
@@ -779,7 +864,7 @@ def iniciar_ctrader():
 
 
 # =========================================================
-# INICIAR HILO
+# INICIAR HILO CTRADER
 # =========================================================
 
 print("INICIANDO HILO CTRADER")
