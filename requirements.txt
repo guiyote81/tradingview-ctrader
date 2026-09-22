@@ -1,3 +1,6 @@
 Flask
-gunicorn
+twisted
+service-identity
+idna
 ctrader-open-api
+protobuf
