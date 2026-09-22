@@ -1,588 +1,347 @@
 import os
 import threading
+import time
 
-from flask import Flask, request
+from flask import Flask, request, jsonify
 
 from ctrader_open_api import Client, EndPoints, Protobuf, TcpProtocol
-from ctrader_open_api.messages.OpenApiMessages_pb2 import *
-
+from ctrader_open_api.messages.OpenApiCommonMessages_pb2 import ProtoHeartbeatEvent
+from ctrader_open_api.messages.OpenApiMessages_pb2 import (
+    ProtoOAApplicationAuthReq,
+    ProtoOAAccountAuthReq,
+    ProtoOAGetAccountListByAccessTokenReq,
+    ProtoOANewOrderReq,
+)
+from ctrader_open_api.messages.OpenApiModelMessages_pb2 import ProtoOATradeSide, ProtoOAOrderType
+from ctrader_open_api.messages.OpenApiCommonMessages_pb2 import ProtoOAErrorRes
 from twisted.internet import reactor
 
 
 app = Flask(__name__)
 
-
 # ============================================================
-# CONFIGURACION
-# ============================================================
-
-CLIENT_ID = os.getenv("CTRADER_CLIENT_ID")
-CLIENT_SECRET = os.getenv("CTRADER_CLIENT_SECRET")
-ACCESS_TOKEN = os.getenv("CTRADER_ACCESS_TOKEN")
-
-# CUENTA DEMO
-ACCOUNT_ID = 48481130
-
-
-# ============================================================
-# SIMBOLOS
-# ============================================================
-
-# NAS100
-NAS100_SYMBOL_ID = 10014
-NAS100_VOLUME = 10
-
-# XAUUSD
-XAUUSD_SYMBOL_ID = 41
-XAUUSD_VOLUME = 100
-
-
-# ============================================================
-# ESTADO GLOBAL CTRADER
+# VARIABLES CTRADER
 # ============================================================
 
 ctrader_client = None
-
 ctrader_conectado = False
 aplicacion_autenticada = False
 cuenta_autenticada = False
-
 ctrader_iniciado = False
 
+ACCOUNT_ID = 48481130
 
 # ============================================================
-# MOSTRAR ESTADO
+# FUNCION PARA ABRIR OPERACION
 # ============================================================
 
-def mostrar_estado():
+def abrir_operacion(symbol_id, volume, side, nombre_simbolo):
+    global ctrader_client, cuenta_autenticada
 
-    print("================================")
-    print("CTRADER: ESTADO ACTUAL")
-    print("CLIENTE CREADO:", ctrader_client is not None)
-    print("CONECTADO:", ctrader_conectado)
-    print("APLICACION AUTENTICADA:", aplicacion_autenticada)
-    print("CUENTA AUTENTICADA:", cuenta_autenticada)
-    print("ACCOUNT ID:", ACCOUNT_ID)
-    print("================================")
-
-
-# ============================================================
-# ERROR DE COMUNICACION
-# ============================================================
-
-def error_comunicacion(failure):
-
-    print("================================")
-    print("CTRADER: ERROR DE COMUNICACION")
-    print(failure)
-    print("================================")
-
-
-# ============================================================
-# ABRIR OPERACION
-# ============================================================
-
-def abrir_operacion(nombre, symbol_id, volume, lado):
-
-    global ctrader_client
-    global cuenta_autenticada
-
-    print("================================")
+    print("=================================")
     print("CTRADER: INTENTANDO ABRIR OPERACION")
-    print("SIMBOLO:", nombre)
+    print("SIMBOLO:", nombre_simbolo)
     print("SYMBOL ID:", symbol_id)
     print("VOLUMEN:", volume)
-
-    if volume == 10 or volume == 100:
-        print("LOTES: 0.01")
-    else:
-        print("LOTES: VOLUMEN CONFIGURADO")
-
-    print("LADO:", lado)
+    print("LADO:", side)
     print("CUENTA:", ACCOUNT_ID)
-    print("================================")
-
-
-    # --------------------------------------------------------
-    # CLIENTE
-    # --------------------------------------------------------
+    print("=================================")
 
     if ctrader_client is None:
-
         print("CTRADER: ERROR - CLIENTE NO DISPONIBLE")
-
-        mostrar_estado()
-
         return
-
-
-    # --------------------------------------------------------
-    # CUENTA
-    # --------------------------------------------------------
 
     if not cuenta_autenticada:
-
-        print("CTRADER: ERROR - CUENTA TODAVIA NO AUTENTICADA")
-
-        mostrar_estado()
-
+        print("CTRADER: ERROR - CUENTA NO AUTENTICADA")
         return
 
-
-    # --------------------------------------------------------
-    # CREAR ORDEN
-    # --------------------------------------------------------
-
-    orden = ProtoOANewOrderReq()
-
-    orden.ctidTraderAccountId = ACCOUNT_ID
-    orden.symbolId = symbol_id
-    orden.orderType = ProtoOAOrderType.MARKET
-
-    if lado == "BUY":
-
-        orden.tradeSide = ProtoOATradeSide.BUY
-
-    else:
-
-        orden.tradeSide = ProtoOATradeSide.SELL
-
-    orden.volume = volume
-    orden.label = "TV_" + nombre
-
-
-    print("CTRADER: CLIENTE DISPONIBLE")
-    print("CTRADER: CUENTA AUTENTICADA")
-    print("CTRADER: ENVIANDO ORDEN")
-    print("================================")
-
-
     try:
+        request_order = ProtoOANewOrderReq()
 
-        deferred = ctrader_client.send(orden)
+        request_order.ctidTraderAccountId = ACCOUNT_ID
+        request_order.symbolId = symbol_id
+        request_order.orderType = ProtoOAOrderType.MARKET
+        request_order.tradeSide = side
+        request_order.volume = volume
+        request_order.label = "SR_M30_RETEST"
 
-        deferred.addErrback(error_comunicacion)
+        print("CTRADER: ENVIANDO ORDEN")
 
-        print("CTRADER: ORDEN ENVIADA AL SERVIDOR")
+        reactor.callFromThread(
+            ctrader_client.send,
+            request_order
+        )
+
+        print("CTRADER: ORDEN ENVIADA")
 
     except Exception as e:
-
-        print("================================")
-        print("CTRADER: EXCEPCION AL ENVIAR ORDEN")
-        print("ERROR:", e)
-        print("================================")
+        print("CTRADER: ERROR AL ENVIAR ORDEN:", str(e))
 
 
 # ============================================================
-# PROCESAR ALERTA TRADINGVIEW
+# PROCESAR ALERTA DE TRADINGVIEW
 # ============================================================
 
 def procesar_alerta(mensaje):
+    mensaje = mensaje.upper()
 
-    mensaje = mensaje.strip().upper()
-
-    print("================================")
+    print("=================================")
     print("CTRADER: PROCESANDO ALERTA")
     print("MENSAJE:", mensaje)
-    print("================================")
+    print("=================================")
 
-
-    # ========================================================
-    # NAS100
-    # ========================================================
-
-    if "NAS100" in mensaje or "NASDAQ" in mensaje:
-
-        if "COMPRA" in mensaje or "BUY" in mensaje:
-
-            print("CTRADER: ALERTA NAS100 COMPRA")
-
-            abrir_operacion(
-                "NAS100",
-                NAS100_SYMBOL_ID,
-                NAS100_VOLUME,
-                "BUY"
-            )
-
-            return
-
-
-        if "VENTA" in mensaje or "SELL" in mensaje:
-
-            print("CTRADER: ALERTA NAS100 VENTA")
-
-            abrir_operacion(
-                "NAS100",
-                NAS100_SYMBOL_ID,
-                NAS100_VOLUME,
-                "SELL"
-            )
-
-            return
-
-
-    # ========================================================
-    # XAUUSD
-    # ========================================================
+    # --------------------------------------------------------
+    # DETERMINAR SIMBOLO
+    # --------------------------------------------------------
 
     if "XAUUSD" in mensaje or "ORO" in mensaje:
+        symbol_id = 41
+        nombre_simbolo = "XAUUSD"
+        volume = 100
 
-        if "COMPRA" in mensaje or "BUY" in mensaje:
+    elif "NAS100" in mensaje or "NASDAQ" in mensaje:
+        symbol_id = 10014
+        nombre_simbolo = "NAS100"
+        volume = 10
 
-            print("CTRADER: ALERTA XAUUSD COMPRA")
+    else:
+        print("CTRADER: SIMBOLO NO RECONOCIDO")
+        return
 
-            abrir_operacion(
-                "XAUUSD",
-                XAUUSD_SYMBOL_ID,
-                XAUUSD_VOLUME,
-                "BUY"
-            )
+    # --------------------------------------------------------
+    # DETERMINAR OPERACION
+    # --------------------------------------------------------
 
-            return
+    if "VENTA" in mensaje or "SELL" in mensaje:
+        side = ProtoOATradeSide.SELL
+        print("CTRADER: ALERTA", nombre_simbolo, "VENTA")
 
+    elif "COMPRA" in mensaje or "BUY" in mensaje:
+        side = ProtoOATradeSide.BUY
+        print("CTRADER: ALERTA", nombre_simbolo, "COMPRA")
 
-        if "VENTA" in mensaje or "SELL" in mensaje:
+    else:
+        print("CTRADER: TIPO DE OPERACION NO RECONOCIDO")
+        return
 
-            print("CTRADER: ALERTA XAUUSD VENTA")
-
-            abrir_operacion(
-                "XAUUSD",
-                XAUUSD_SYMBOL_ID,
-                XAUUSD_VOLUME,
-                "SELL"
-            )
-
-            return
-
-
-    print("CTRADER: ALERTA NO RECONOCIDA")
+    abrir_operacion(
+        symbol_id,
+        volume,
+        side,
+        nombre_simbolo
+    )
 
 
 # ============================================================
-# MENSAJES CTRADER
+# CALLBACK CTRADER
 # ============================================================
 
 def mensaje_recibido(client, message):
-
+    global ctrader_conectado
     global aplicacion_autenticada
     global cuenta_autenticada
 
-    payload_type = message.payloadType
+    try:
 
-    print("================================")
-    print("CTRADER: MENSAJE RECIBIDO")
-    print("PAYLOAD TYPE:", payload_type)
-    print("================================")
+        payload_type = message.payloadType
 
+        # ----------------------------------------------------
+        # HEARTBEAT
+        # ----------------------------------------------------
 
-    # ========================================================
-    # 2101 - APPLICATION AUTHENTICATED
-    # ========================================================
+        if payload_type == 51:
+            print("CTRADER: HEARTBEAT")
+            return
 
-    if payload_type == ProtoOAApplicationAuthRes().payloadType:
+        # ----------------------------------------------------
+        # AUTENTICACION DE APLICACION
+        # ----------------------------------------------------
 
-        aplicacion_autenticada = True
+        if payload_type == ProtoOAApplicationAuthReq().payloadType:
+            print("CTRADER: MENSAJE DE AUTENTICACION RECIBIDO")
 
-        print("================================")
-        print("CTRADER: APLICACION AUTENTICADA")
-        print("================================")
+        # ----------------------------------------------------
+        # RESPUESTA AUTENTICACION APP
+        # ----------------------------------------------------
 
+        if payload_type == 2100:
 
-        if not ACCESS_TOKEN:
+            print("=================================")
+            print("CTRADER: APLICACION AUTENTICADA")
+            print("=================================")
 
-            print("CTRADER: ERROR - ACCESS TOKEN VACIO")
+            aplicacion_autenticada = True
+
+            request_accounts = ProtoOAGetAccountListByAccessTokenReq()
+
+            request_accounts.accessToken = os.getenv(
+                "CTRADER_ACCESS_TOKEN"
+            )
+
+            print("CTRADER: SOLICITANDO CUENTAS")
+
+            client.send(request_accounts)
 
             return
 
+        # ----------------------------------------------------
+        # LISTA DE CUENTAS
+        # ----------------------------------------------------
 
-        print("CTRADER: SOLICITANDO CUENTAS")
+        if payload_type == 2115:
 
+            print("CTRADER: RESPUESTA LISTA DE CUENTAS")
 
-        cuenta_req = ProtoOAGetAccountListByAccessTokenReq()
+            response = Protobuf.extract(message)
 
-        cuenta_req.accessToken = ACCESS_TOKEN
+            print("CTRADER: CUENTAS ENCONTRADAS")
 
+            cuentas = getattr(response, "ctidTraderAccount", [])
 
-        try:
+            cuenta_encontrada = False
 
-            deferred = client.send(cuenta_req)
+            for cuenta in cuentas:
 
-            deferred.addErrback(error_comunicacion)
+                print(
+                    "CTRADER: CUENTA:",
+                    cuenta.ctidTraderAccountId
+                )
 
-        except Exception as e:
+                if cuenta.ctidTraderAccountId == ACCOUNT_ID:
 
-            print("CTRADER: ERROR SOLICITANDO CUENTAS")
-            print("ERROR:", e)
+                    cuenta_encontrada = True
 
-        return
+                    print(
+                        "CTRADER: CUENTA OBJETIVO ENCONTRADA"
+                    )
 
+                    auth_account = ProtoOAAccountAuthReq()
 
-    # ========================================================
-    # ACCOUNT LIST
-    # ========================================================
+                    auth_account.ctidTraderAccountId = ACCOUNT_ID
 
-    if payload_type == ProtoOAGetAccountListByAccessTokenRes().payloadType:
+                    auth_account.accessToken = os.getenv(
+                        "CTRADER_ACCESS_TOKEN"
+                    )
 
-        respuesta = Protobuf.extract(message)
+                    print(
+                        "CTRADER: AUTENTICANDO CUENTA"
+                    )
 
-        print("================================")
-        print("CTRADER: RESPUESTA DE CUENTAS")
-        print("================================")
+                    client.send(auth_account)
 
+                    break
 
-        cuentas = respuesta.ctidTraderAccount
+            if not cuenta_encontrada:
+                print(
+                    "CTRADER: ERROR - CUENTA",
+                    ACCOUNT_ID,
+                    "NO ENCONTRADA"
+                )
 
-        print("CANTIDAD DE CUENTAS:", len(cuentas))
+            return
 
+        # ----------------------------------------------------
+        # CUENTA AUTENTICADA
+        # ----------------------------------------------------
 
-        cuenta_encontrada = False
+        if payload_type == 2101:
 
+            print("=================================")
+            print("CTRADER: CUENTA AUTENTICADA")
+            print("=================================")
 
-        for cuenta in cuentas:
-
-            account_id = int(
-                cuenta.ctidTraderAccountId
-            )
+            cuenta_autenticada = True
 
             print(
-                "CUENTA ENCONTRADA:",
-                account_id
+                "CTRADER: CLIENTE LISTO PARA OPERAR"
             )
 
+            return
 
-            if account_id == ACCOUNT_ID:
+        # ----------------------------------------------------
+        # ERROR CTRADER
+        # ----------------------------------------------------
 
-                cuenta_encontrada = True
+        if payload_type == 2142:
 
-                print("================================")
-                print("CTRADER: CUENTA OBJETIVO ENCONTRADA")
-                print("ACCOUNT ID:", ACCOUNT_ID)
-                print("================================")
+            response = Protobuf.extract(message)
 
-
-                cuenta_auth = ProtoOAAccountAuthReq()
-
-                cuenta_auth.ctidTraderAccountId = ACCOUNT_ID
-                cuenta_auth.accessToken = ACCESS_TOKEN
-
-
-                print("CTRADER: AUTENTICANDO CUENTA")
-
-
-                try:
-
-                    deferred = client.send(cuenta_auth)
-
-                    deferred.addErrback(error_comunicacion)
-
-                except Exception as e:
-
-                    print("CTRADER: ERROR AUTENTICANDO CUENTA")
-                    print("ERROR:", e)
-
-                break
-
-
-        if not cuenta_encontrada:
-
-            print("================================")
+            print("=================================")
             print("CTRADER: ERROR")
-            print("LA CUENTA OBJETIVO NO APARECE")
-            print("ACCOUNT ID:", ACCOUNT_ID)
-            print("================================")
+            print(response)
+            print("=================================")
 
-        return
+            return
 
+        # ----------------------------------------------------
+        # ERROR DE ORDEN
+        # ----------------------------------------------------
 
-    # ========================================================
-    # 2103 - ACCOUNT AUTHENTICATED
-    # ========================================================
+        if payload_type == 2122:
 
-    if payload_type == ProtoOAAccountAuthRes().payloadType:
+            response = Protobuf.extract(message)
 
-        respuesta = Protobuf.extract(message)
+            print("=================================")
+            print("CTRADER: ERROR DE ORDEN")
+            print(response)
+            print("=================================")
 
-        cuenta_autenticada = True
+            return
 
-        print("================================")
-        print("CTRADER: CUENTA AUTENTICADA")
-        print("ACCOUNT ID:",
-              respuesta.ctidTraderAccountId)
-        print("DEMO: SI")
-        print("TRADING HABILITADO")
-        print("================================")
+        # ----------------------------------------------------
+        # EJECUCION
+        # ----------------------------------------------------
 
-        mostrar_estado()
+        if payload_type == 2126:
 
-        print("CTRADER: CLIENTE LISTO PARA OPERAR")
+            response = Protobuf.extract(message)
 
-        print("================================")
+            print("=================================")
+            print("CTRADER: EJECUCION RECIBIDA")
+            print(response)
+            print("=================================")
 
-        return
+            return
 
+    except Exception as e:
 
-    # ========================================================
-    # ERROR GENERAL
-    # ========================================================
-
-    if payload_type == ProtoOAErrorRes().payloadType:
-
-        respuesta = Protobuf.extract(message)
-
-        print("================================")
-        print("CTRADER: ERROR GENERAL")
-        print("ERROR CODE:", respuesta.errorCode)
-
-        if respuesta.HasField("description"):
-
-            print(
-                "DESCRIPTION:",
-                respuesta.description
-            )
-
-        print("================================")
-
-        return
-
-
-    # ========================================================
-    # ERROR DE ORDEN
-    # ========================================================
-
-    if payload_type == ProtoOAOrderErrorEvent().payloadType:
-
-        respuesta = Protobuf.extract(message)
-
-        print("================================")
-        print("CTRADER: ERROR DE ORDEN")
-        print("ERROR CODE:", respuesta.errorCode)
-
-        if respuesta.HasField("description"):
-
-            print(
-                "DESCRIPTION:",
-                respuesta.description
-            )
-
-        print("================================")
-
-        return
-
-
-    # ========================================================
-    # EVENTO DE EJECUCION
-    # ========================================================
-
-    if payload_type == ProtoOAExecutionEvent().payloadType:
-
-        respuesta = Protobuf.extract(message)
-
-        print("================================")
-        print("CTRADER: EVENTO DE EJECUCION")
-        print("EXECUTION TYPE:",
-              respuesta.executionType)
-
-
-        if respuesta.HasField("order"):
-
-            orden = respuesta.order
-
-            print("ORDER ID:", orden.orderId)
-            print("ORDER STATUS:", orden.orderStatus)
-
-
-        if respuesta.HasField("position"):
-
-            posicion = respuesta.position
-
-            print("POSITION ID:", posicion.positionId)
-
-
-        if respuesta.HasField("deal"):
-
-            deal = respuesta.deal
-
-            print("DEAL ID:", deal.dealId)
-
-
-        print("================================")
-
-        return
-
-
-    # ========================================================
-    # HEARTBEAT
-    # ========================================================
-
-    if payload_type == 51:
-
-        print("CTRADER: HEARTBEAT OK")
-
-        return
-
-
-    print("CTRADER: MENSAJE NO PROCESADO")
-    print("PAYLOAD TYPE:", payload_type)
+        print(
+            "CTRADER: ERROR EN CALLBACK:",
+            str(e)
+        )
 
 
 # ============================================================
-# CONECTADO
+# CALLBACK CONEXION
 # ============================================================
 
 def conectado_callback(client):
-
     global ctrader_conectado
+
+    print("=================================")
+    print("CTRADER: CONECTADO")
+    print("=================================")
 
     ctrader_conectado = True
 
-    print("================================")
-    print("CTRADER: CONECTADO")
-    print("================================")
+    client_id = os.getenv(
+        "CTRADER_CLIENT_ID"
+    )
 
+    client_secret = os.getenv(
+        "CTRADER_CLIENT_SECRET"
+    )
 
     print(
         "CTRADER: ENVIANDO AUTENTICACION DE APLICACION"
     )
 
+    auth_request = ProtoOAApplicationAuthReq()
 
-    auth = ProtoOAApplicationAuthReq()
+    auth_request.clientId = client_id
+    auth_request.clientSecret = client_secret
 
-    auth.clientId = CLIENT_ID
-    auth.clientSecret = CLIENT_SECRET
-
-
-    try:
-
-        deferred = client.send(auth)
-
-        deferred.addErrback(error_comunicacion)
-
-    except Exception as e:
-
-        print("================================")
-        print("CTRADER: ERROR EN AUTENTICACION")
-        print("ERROR:", e)
-        print("================================")
-
-
-# ============================================================
-# DESCONECTADO
-# ============================================================
-
-def desconectado_callback(client, reason):
-
-    global ctrader_conectado
-    global aplicacion_autenticada
-    global cuenta_autenticada
-
-    ctrader_conectado = False
-    aplicacion_autenticada = False
-    cuenta_autenticada = False
-
-    print("================================")
-    print("CTRADER: DESCONECTADO")
-    print("MOTIVO:", reason)
-    print("================================")
+    client.send(auth_request)
 
 
 # ============================================================
@@ -594,129 +353,92 @@ def iniciar_ctrader():
     global ctrader_client
     global ctrader_iniciado
 
-
-    if ctrader_iniciado:
-
-        print("CTRADER: YA ESTA INICIADO")
-
-        return
-
-
-    ctrader_iniciado = True
-
-
-    print("================================")
+    print("=================================")
     print("INICIANDO CTRADER")
-    print("================================")
+    print("=================================")
 
+    client_id = os.getenv(
+        "CTRADER_CLIENT_ID"
+    )
 
-    # --------------------------------------------------------
-    # VARIABLES
-    # --------------------------------------------------------
+    client_secret = os.getenv(
+        "CTRADER_CLIENT_SECRET"
+    )
 
-    if not CLIENT_ID:
+    access_token = os.getenv(
+        "CTRADER_ACCESS_TOKEN"
+    )
 
-        print("CTRADER: FALTA CTRADER_CLIENT_ID")
-
-    if not CLIENT_SECRET:
-
-        print("CTRADER: FALTA CTRADER_CLIENT_SECRET")
-
-    if not ACCESS_TOKEN:
-
-        print("CTRADER: FALTA CTRADER_ACCESS_TOKEN")
-
-
-    if not CLIENT_ID or not CLIENT_SECRET or not ACCESS_TOKEN:
-
-        print("CTRADER: NO SE PUEDE INICIAR")
-
-        return
-
-
-    print("CTRADER: VARIABLES ENCONTRADAS")
+    print(
+        "CTRADER: VARIABLES ENCONTRADAS"
+    )
 
     print(
         "CTRADER: CLIENT ID PRESENTE:",
-        bool(CLIENT_ID)
+        bool(client_id)
     )
 
     print(
         "CTRADER: CLIENT SECRET PRESENTE:",
-        bool(CLIENT_SECRET)
+        bool(client_secret)
     )
 
     print(
         "CTRADER: ACCESS TOKEN PRESENTE:",
-        bool(ACCESS_TOKEN)
+        bool(access_token)
     )
 
+    if not client_id or not client_secret or not access_token:
 
-    # --------------------------------------------------------
-    # CREAR CLIENTE DEMO
-    # --------------------------------------------------------
-
-    print("CTRADER: CREANDO CLIENTE DEMO")
-
-
-    ctrader_client = Client(
-        EndPoints.PROTOBUF_DEMO_HOST,
-        EndPoints.PROTOBUF_PORT,
-        TcpProtocol
-    )
-
-
-    print("CTRADER: CLIENTE CREADO")
-
-
-    # --------------------------------------------------------
-    # CALLBACKS
-    # --------------------------------------------------------
-
-    ctrader_client.setConnectedCallback(
-        conectado_callback
-    )
-
-    ctrader_client.setDisconnectedCallback(
-        desconectado_callback
-    )
-
-    ctrader_client.setMessageReceivedCallback(
-        mensaje_recibido
-    )
-
-
-    print("CTRADER: CALLBACKS CONFIGURADOS")
-
-
-    # --------------------------------------------------------
-    # SERVICIO
-    # --------------------------------------------------------
-
-    try:
-
-        print("CTRADER: INICIANDO SERVICIO")
-
-        ctrader_client.startService()
-
-        print("CTRADER: SERVICIO INICIADO")
-
-    except Exception as e:
-
-        print("================================")
-        print("CTRADER: ERROR STARTSERVICE")
-        print("ERROR:", e)
-        print("================================")
+        print(
+            "CTRADER: ERROR - FALTAN VARIABLES"
+        )
 
         return
 
-
-    print("================================")
-    print("CTRADER: EJECUTANDO REACTOR")
-    print("================================")
-
-
     try:
+
+        print(
+            "CTRADER: CREANDO CLIENTE DEMO"
+        )
+
+        ctrader_client = Client(
+            EndPoints.PROTOBUF_DEMO_HOST,
+            EndPoints.PROTOBUF_PORT,
+            TcpProtocol
+        )
+
+        print(
+            "CTRADER: CLIENTE CREADO"
+        )
+
+        ctrader_client.setConnectedCallback(
+            conectado_callback
+        )
+
+        ctrader_client.setMessageReceivedCallback(
+            mensaje_recibido
+        )
+
+        print(
+            "CTRADER: CALLBACKS CONFIGURADOS"
+        )
+
+        print(
+            "CTRADER: INICIANDO SERVICIO"
+        )
+
+        ctrader_client.startService()
+
+        ctrader_iniciado = True
+
+        print(
+            "CTRADER: SERVICIO INICIADO"
+        )
+
+        print("=================================")
+        print("CTRADER: INICIANDO REACTOR")
+        print("=================================")
 
         reactor.run(
             installSignalHandlers=False
@@ -724,86 +446,117 @@ def iniciar_ctrader():
 
     except Exception as e:
 
-        print("================================")
-        print("CTRADER: ERROR REACTOR")
-        print("ERROR:", e)
-        print("================================")
+        print(
+            "CTRADER: ERROR AL INICIAR:",
+            str(e)
+        )
 
 
 # ============================================================
-# FLASK
-# ============================================================
-
-@app.route("/", methods=["GET"])
-def home():
-
-    return "Servidor TradingView cTrader funcionando"
-
-
-# ============================================================
-# STATUS
-# ============================================================
-
-@app.route("/status", methods=["GET"])
-def status():
-
-    return {
-        "cliente_creado":
-            ctrader_client is not None,
-
-        "conectado":
-            ctrader_conectado,
-
-        "aplicacion_autenticada":
-            aplicacion_autenticada,
-
-        "cuenta_autenticada":
-            cuenta_autenticada,
-
-        "account_id":
-            ACCOUNT_ID
-    }
-
-
-# ============================================================
-# WEBHOOK
+# WEBHOOK TRADINGVIEW
 # ============================================================
 
 @app.route("/webhook", methods=["POST"])
 def webhook():
 
-    mensaje = request.get_data(
-        as_text=True
+    try:
+
+        data = request.get_json(
+            silent=True
+        )
+
+        if data is None:
+
+            mensaje = request.data.decode(
+                "utf-8",
+                errors="ignore"
+            )
+
+        elif isinstance(data, dict):
+
+            mensaje = (
+                data.get("message")
+                or data.get("alert")
+                or str(data)
+            )
+
+        else:
+
+            mensaje = str(data)
+
+        print("=================================")
+        print("WEBHOOK RECIBIDO")
+        print("MENSAJE RECIBIDO:", mensaje)
+        print("=================================")
+
+        procesar_alerta(
+            mensaje
+        )
+
+        return jsonify(
+            {
+                "status": "ok",
+                "message": "Alerta recibida"
+            }
+        ), 200
+
+    except Exception as e:
+
+        print(
+            "WEBHOOK ERROR:",
+            str(e)
+        )
+
+        return jsonify(
+            {
+                "status": "error",
+                "error": str(e)
+            }
+        ), 500
+
+
+# ============================================================
+# ESTADO
+# ============================================================
+
+@app.route("/status", methods=["GET"])
+def status():
+
+    return jsonify(
+        {
+            "ctrader_iniciado": ctrader_iniciado,
+            "ctrader_conectado": ctrader_conectado,
+            "aplicacion_autenticada": aplicacion_autenticada,
+            "cuenta_autenticada": cuenta_autenticada,
+            "account_id": ACCOUNT_ID
+        }
     )
 
 
-    print("================================")
-    print("WEBHOOK RECIBIDO")
-    print("Mensaje recibido:", mensaje)
-    print("================================")
+# ============================================================
+# PAGINA PRINCIPAL
+# ============================================================
 
+@app.route("/", methods=["GET"])
+def inicio():
 
-    procesar_alerta(mensaje)
-
-
-    return "Webhook recibido correctamente"
+    return (
+        "Servidor TradingView cTrader funcionando"
+    )
 
 
 # ============================================================
-# INICIO CTRADER
+# INICIAR CTRADER EN SEGUNDO PLANO
 # ============================================================
 
-ctrader_thread = threading.Thread(
+threading.Thread(
     target=iniciar_ctrader,
-    daemon=True,
-    name="CTRADER_THREAD"
-)
-
-ctrader_thread.start()
+    daemon=True
+).start()
 
 
 # ============================================================
-# FLASK
+# INICIAR FLASK
 # ============================================================
 
 if __name__ == "__main__":
@@ -811,7 +564,9 @@ if __name__ == "__main__":
     app.run(
         host="0.0.0.0",
         port=int(
-            os.getenv("PORT", "10000")
+            os.environ.get(
+                "PORT",
+                10000
+            )
         )
     )
-```
