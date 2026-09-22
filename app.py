@@ -1,69 +1,64 @@
 import os
 from flask import Flask, request
 from threading import Thread
-from twisted.internet import reactor, ssl
+from twisted.internet import reactor
 from ctrader_open_api import Client
 from ctrader_open_api.messages.OpenApiCommonMessages_pb2 import *
 from ctrader_open_api.messages.OpenApiMessages_pb2 import *
-from ctrader_open_api.messages.OpenApiModelMessages_pb2 import *
 
 app = Flask(__name__)
 
-# Leemos tus variables de Render
 CLIENT_ID = os.getenv("CTRADER_CLIENT_ID")
 CLIENT_SECRET = os.getenv("CTRADER_CLIENT_SECRET")
 ACCESS_TOKEN = os.getenv("CTRADER_ACCESS_TOKEN")
-ACCOUNT_ID = int(os.getenv("CTRADER_ACCOUNT_ID"))
+ACCOUNT_ID = int(os.getenv("CTRADER_ACCOUNT_ID", "0"))
 
-# DEMO = 5035, LIVE = 5032 - cambia esto segun tu cuenta
-HOST = "demo.ctraderapi.com" 
-PORT = 5035
+HOST = "demo.ctraderapi.com"
+PORT = 5035 # usa 5032 si es LIVE
 
-client = Client(HOST, PORT, ssl_context_factory=ssl.ClientContextFactory)
+client = Client(HOST, PORT) # <- CORREGIDO, sin ssl_context_factory
 is_ready = False
 
 def on_connected(_):
-    print("Conectado a cTrader API, autenticando app...")
+    print("Conectado a cTrader, autenticando app...")
     req = ProtoOAApplicationAuthReq()
     req.clientId = CLIENT_ID
     req.clientSecret = CLIENT_SECRET
     client.send(req)
 
-def on_app_auth(res):
-    print("App autenticada, autenticando cuenta...")
-    req = ProtoOAAccountAuthReq()
-    req.ctidTraderAccountId = ACCOUNT_ID
-    req.accessToken = ACCESS_TOKEN
-    client.send(req)
-
-def on_account_auth(res):
+def on_message(msg):
     global is_ready
-    is_ready = True
-    print(f"¡CUENTA {ACCOUNT_ID} AUTENTICADA! Lista para tradear.")
+    if msg.payloadType == 2101: # App Auth Response
+        print("App autenticada OK, autenticando cuenta...")
+        req = ProtoOAAccountAuthReq()
+        req.ctidTraderAccountId = ACCOUNT_ID
+        req.accessToken = ACCESS_TOKEN
+        client.send(req)
+    elif msg.payloadType == 2103: # Account Auth Response
+        is_ready = True
+        print(f"¡CUENTA {ACCOUNT_ID} AUTENTICADA! Lista para tradear.")
+    else:
+        print(f"Mensaje recibido: {msg.payloadType}")
 
 def execute_order(data):
-    # data viene de TradingView: {"symbol": "EURUSD", "action": "buy", "volume": 1000}
-    print(f"Ejecutando: {data}")
-    # Aqui va tu logica de ProtoOANewOrderReq
-    # ...
+    print(f"EJECUTANDO ORDEN REAL: {data}")
+    # acá va tu lógica de NewOrder
 
 def start_reactor():
+    print("INICIANDO CTRADER")
     client.setConnectedCallback(on_connected)
-    client.setMessageReceiver(lambda msg: {
-        2100: on_app_auth,
-        2102: on_account_auth
-    }.get(msg.payloadType, lambda x: None)(msg))
+    client.setMessageReceiver(on_message)
     client.startService()
     reactor.run(installSignalHandlers=0)
 
 @app.route('/webhook', methods=['POST'])
 def webhook():
     if not is_ready:
-        return {"error": "cTrader no conectado aun, esperando auth"}, 503
-    
+        print("Webhook recibido pero cTrader aun no listo")
+        return {"error": "cTrader no listo"}, 503
     data = request.get_json()
     reactor.callFromThread(execute_order, data)
-    return {"status": "orden enviada a cTrader"}, 200
+    return {"status": "ok"}, 200
 
 @app.route('/')
 def home():
