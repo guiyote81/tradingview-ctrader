@@ -50,7 +50,7 @@ def interpretar_alerta(message):
 def run_ctrader():
     global client
     client = Client(EndPoints.PROTOBUF_DEMO_HOST, EndPoints.PROTOBUF_PORT, TcpProtocol)
-    def on_connected():
+ def on_connected(client_instance):
         status["conectado"] = True
         req = ProtoOAApplicationAuthReq(); req.clientId = CLIENT_ID; req.clientSecret = CLIENT_SECRET
         client.send(req)
@@ -64,7 +64,7 @@ def run_ctrader():
             if hasattr(msg.payload, "ctidTraderAccountId") and msg.payload.ctidTraderAccountId == ACCOUNT_ID:
                 if status["app_auth"]: status["acc_auth"] = True; print("LISTO PARA OPERAR")
         except: pass
-    def on_disconnected():
+def on_disconnected(client_instance, reason):
         status["conectado"]=False; status["app_auth"]=False; status["acc_auth"]=False
         time.sleep(5)
         try: client.startService()
