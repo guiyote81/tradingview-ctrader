@@ -10,31 +10,31 @@ from ctrader_open_api.messages.OpenApiMessages_pb2 import *
 app = Flask(__name__)
 
 # ============================================================
-# CONFIGURACION
+# CONFIGURATION
 # ============================================================
 
 CLIENT_ID = os.getenv("CTRADER_CLIENT_ID")
 CLIENT_SECRET = os.getenv("CTRADER_CLIENT_SECRET")
 ACCESS_TOKEN = os.getenv("CTRADER_ACCESS_TOKEN")
 
-# Cuenta DEMO confirmada
+# DEMO ACCOUNT
 ACCOUNT_ID = 48481130
 
-# NAS100 confirmado
+# NAS100
 NAS100_SYMBOL_ID = 10014
 NAS100_VOLUME = 10
 
-# XAUUSD confirmado
+# XAUUSD
 XAUUSD_SYMBOL_ID = 41
 XAUUSD_VOLUME = 100
 
-# Estado
+# STATE
 ctrader_client = None
 cuenta_autenticada = False
 
 
 # ============================================================
-# ABRIR OPERACION
+# OPEN TRADE
 # ============================================================
 
 def abrir_operacion(nombre, symbol_id, volume, lado):
@@ -46,7 +46,7 @@ def abrir_operacion(nombre, symbol_id, volume, lado):
     print("SIMBOLO:", nombre)
     print("SYMBOL ID:", symbol_id)
     print("VOLUMEN:", volume)
-    print("LOTES:", "0.01")
+    print("LOTES: 0.01")
     print("LADO:", lado)
     print("CUENTA:", ACCOUNT_ID)
     print("================================")
@@ -88,7 +88,7 @@ def abrir_operacion(nombre, symbol_id, volume, lado):
 
 
 # ============================================================
-# PROCESAR ALERTA DE TRADINGVIEW
+# PROCESS TRADINGVIEW ALERT
 # ============================================================
 
 def procesar_alerta(mensaje):
@@ -99,9 +99,7 @@ def procesar_alerta(mensaje):
     print("MENSAJE:", mensaje)
     print("================================")
 
-    # --------------------------------------------------------
     # NAS100 / NASDAQ
-    # --------------------------------------------------------
 
     if "NAS100" in mensaje or "NASDAQ" in mensaje:
 
@@ -131,9 +129,7 @@ def procesar_alerta(mensaje):
 
             return
 
-    # --------------------------------------------------------
     # XAUUSD / ORO
-    # --------------------------------------------------------
 
     if "XAUUSD" in mensaje or "ORO" in mensaje:
 
@@ -167,7 +163,7 @@ def procesar_alerta(mensaje):
 
 
 # ============================================================
-# MENSAJES RECIBIDOS DESDE CTRADER
+# CTRADER MESSAGES
 # ============================================================
 
 def mensaje_recibido(client, message):
@@ -178,15 +174,11 @@ def mensaje_recibido(client, message):
     print("PAYLOAD TYPE:", message.payloadType)
     print("================================")
 
-    # --------------------------------------------------------
-    # 2101 - APLICACION AUTENTICADA
-    # --------------------------------------------------------
+    # 2101 - APPLICATION AUTHENTICATED
 
     if message.payloadType == ProtoOAApplicationAuthRes().payloadType:
 
         print("CTRADER: APLICACION AUTENTICADA")
-
-        # NO mostramos el token por seguridad.
         print(
             "CTRADER: ACCESS TOKEN PRESENTE:",
             bool(ACCESS_TOKEN)
@@ -213,9 +205,7 @@ def mensaje_recibido(client, message):
 
         return
 
-    # --------------------------------------------------------
-    # 2150 - LISTA DE CUENTAS
-    # --------------------------------------------------------
+    # 2150 - ACCOUNT LIST
 
     if message.payloadType == ProtoOAGetAccountListByAccessTokenRes().payloadType:
 
@@ -274,9 +264,7 @@ def mensaje_recibido(client, message):
 
         return
 
-    # --------------------------------------------------------
-    # 2103 - CUENTA AUTENTICADA
-    # --------------------------------------------------------
+    # 2103 - ACCOUNT AUTHENTICATED
 
     if message.payloadType == ProtoOAAccountAuthRes().payloadType:
 
@@ -286,19 +274,14 @@ def mensaje_recibido(client, message):
 
         print("================================")
         print("CTRADER: CUENTA CTRADER AUTENTICADA")
-        print(
-            "ACCOUNT ID:",
-            respuesta.ctidTraderAccountId
-        )
+        print("ACCOUNT ID:", respuesta.ctidTraderAccountId)
         print("DEMO: SI")
         print("TRADING HABILITADO")
         print("================================")
 
         return
 
-    # --------------------------------------------------------
-    # 2142 - ERROR GENERAL DE CTRADER
-    # --------------------------------------------------------
+    # 2142 - GENERAL CTRADER ERROR
 
     if message.payloadType == ProtoOAErrorRes().payloadType:
 
@@ -315,9 +298,7 @@ def mensaje_recibido(client, message):
 
         return
 
-    # --------------------------------------------------------
-    # 2132 - ERROR DE ORDEN
-    # --------------------------------------------------------
+    # 2132 - ORDER ERROR
 
     if message.payloadType == ProtoOAOrderErrorEvent().payloadType:
 
@@ -334,9 +315,7 @@ def mensaje_recibido(client, message):
 
         return
 
-    # --------------------------------------------------------
-    # 2126 - EVENTO DE EJECUCION
-    # --------------------------------------------------------
+    # 2126 - EXECUTION EVENT
 
     if message.payloadType == ProtoOAExecutionEvent().payloadType:
 
@@ -366,9 +345,7 @@ def mensaje_recibido(client, message):
 
         return
 
-    # --------------------------------------------------------
     # 51 - HEARTBEAT
-    # --------------------------------------------------------
 
     if message.payloadType == 51:
 
@@ -376,16 +353,12 @@ def mensaje_recibido(client, message):
 
         return
 
-    # --------------------------------------------------------
-    # OTROS MENSAJES
-    # --------------------------------------------------------
-
     print("CTRADER: MENSAJE NO PROCESADO")
     print("PAYLOAD TYPE:", message.payloadType)
 
 
 # ============================================================
-# CONEXION
+# CONNECTION
 # ============================================================
 
 def conectado_callback(client):
@@ -414,7 +387,7 @@ def conectado_callback(client):
 
 
 # ============================================================
-# DESCONEXION
+# DISCONNECTION
 # ============================================================
 
 def desconectado_callback(client, reason):
@@ -430,7 +403,7 @@ def desconectado_callback(client, reason):
 
 
 # ============================================================
-# INICIAR CTRADER
+# START CTRADER
 # ============================================================
 
 def iniciar_ctrader():
@@ -457,22 +430,9 @@ def iniciar_ctrader():
         return
 
     print("CTRADER: VARIABLES ENCONTRADAS")
-
-    print(
-        "CTRADER: CLIENT ID PRESENTE:",
-        bool(CLIENT_ID)
-    )
-
-    print(
-        "CTRADER: CLIENT SECRET PRESENTE:",
-        bool(CLIENT_SECRET)
-    )
-
-    print(
-        "CTRADER: ACCESS TOKEN PRESENTE:",
-        bool(ACCESS_TOKEN)
-    )
-
+    print("CTRADER: CLIENT ID PRESENTE:", bool(CLIENT_ID))
+    print("CTRADER: CLIENT SECRET PRESENTE:", bool(CLIENT_SECRET))
+    print("CTRADER: ACCESS TOKEN PRESENTE:", bool(ACCESS_TOKEN))
     print("CTRADER: CREANDO CLIENTE DEMO")
 
     ctrader_client = Client(
@@ -539,7 +499,7 @@ def webhook():
 
 
 # ============================================================
-# INICIAR CTRADER EN SEGUNDO PLANO
+# START CTRADER IN BACKGROUND
 # ============================================================
 
 threading.Thread(
@@ -549,44 +509,9 @@ threading.Thread(
 
 
 # ============================================================
-# INICIAR FLASK
+# START FLASK
 # ============================================================
 
 if __name__ == "__main__":
 
-    app.run(
-        host="0.0.0.0",
-        port=int(
-            os.environ.get(
-                "PORT",
-                10000
-            )
-        )
-    )
-
-
-
-Ahora hacemos la prueba
-Copiá todo este código.
-Reemplazá el contenido de app.py en GitHub.
-Guardá/commit.
-Esperá que Render haga el deploy.
-No mandes todavía una alerta de TradingView.
-Primero mirá los logs de Render.
-
-Lo que queremos encontrar es esta secuencia:
-
-CTRADER: CONECTADO
-CTRADER: ENVIANDO AUTENTICACION
-CTRADER: APLICACION AUTENTICADA
-CTRADER: ACCESS TOKEN PRESENTE: True
-CTRADER: SOLICITANDO CUENTAS
-CTRADER: RESPUESTA DE CUENTAS RECIBIDA
-CTRADER: CANTIDAD DE CUENTAS: ...
-CUENTA ENCONTRADA: 48481130
-CTRADER: CUENTA OBJETIVO ENCONTRADA
-CTRADER: AUTENTICANDO CUENTA
-CTRADER: CUENTA CTRADER AUTENTICADA
-ACCOUNT ID: 48481130
-DEMO: SI
-TRADING HABILITADO
+ app.run(...)
