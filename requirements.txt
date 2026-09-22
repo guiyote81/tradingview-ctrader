@@ -4,3 +4,4 @@ service-identity
 idna
 ctrader-open-api
 protobuf
+requests
