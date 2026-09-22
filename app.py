@@ -185,6 +185,17 @@ def mensaje_recibido(client, message):
     if message.payloadType == ProtoOAApplicationAuthRes().payloadType:
 
         print("CTRADER: APLICACION AUTENTICADA")
+
+        # NO mostramos el token por seguridad.
+        print(
+            "CTRADER: ACCESS TOKEN PRESENTE:",
+            bool(ACCESS_TOKEN)
+        )
+
+        if not ACCESS_TOKEN:
+            print("CTRADER: ERROR - ACCESS TOKEN VACIO")
+            return
+
         print("CTRADER: SOLICITANDO CUENTAS")
 
         cuenta_req = ProtoOAGetAccountListByAccessTokenReq()
@@ -211,7 +222,7 @@ def mensaje_recibido(client, message):
         respuesta = Protobuf.extract(message)
 
         print("================================")
-        print("CTRADER: LISTA DE CUENTAS RECIBIDA")
+        print("CTRADER: RESPUESTA DE CUENTAS RECIBIDA")
         print("================================")
 
         cuentas = respuesta.ctidTraderAccount
@@ -222,7 +233,10 @@ def mensaje_recibido(client, message):
 
         for cuenta in cuentas:
 
-            print("CUENTA ENCONTRADA:", cuenta.ctidTraderAccountId)
+            print(
+                "CUENTA ENCONTRADA:",
+                cuenta.ctidTraderAccountId
+            )
 
             if int(cuenta.ctidTraderAccountId) == ACCOUNT_ID:
 
@@ -272,7 +286,10 @@ def mensaje_recibido(client, message):
 
         print("================================")
         print("CTRADER: CUENTA CTRADER AUTENTICADA")
-        print("ACCOUNT ID:", respuesta.ctidTraderAccountId)
+        print(
+            "ACCOUNT ID:",
+            respuesta.ctidTraderAccountId
+        )
         print("DEMO: SI")
         print("TRADING HABILITADO")
         print("================================")
@@ -372,6 +389,7 @@ def mensaje_recibido(client, message):
 # ============================================================
 
 def conectado_callback(client):
+
     print("================================")
     print("CTRADER: CONECTADO")
     print("================================")
@@ -400,6 +418,7 @@ def conectado_callback(client):
 # ============================================================
 
 def desconectado_callback(client, reason):
+
     global cuenta_autenticada
 
     cuenta_autenticada = False
@@ -438,6 +457,22 @@ def iniciar_ctrader():
         return
 
     print("CTRADER: VARIABLES ENCONTRADAS")
+
+    print(
+        "CTRADER: CLIENT ID PRESENTE:",
+        bool(CLIENT_ID)
+    )
+
+    print(
+        "CTRADER: CLIENT SECRET PRESENTE:",
+        bool(CLIENT_SECRET)
+    )
+
+    print(
+        "CTRADER: ACCESS TOKEN PRESENTE:",
+        bool(ACCESS_TOKEN)
+    )
+
     print("CTRADER: CREANDO CLIENTE DEMO")
 
     ctrader_client = Client(
@@ -448,9 +483,17 @@ def iniciar_ctrader():
 
     print("CTRADER: CLIENTE CREADO")
 
-    ctrader_client.setConnectedCallback(conectado_callback)
-    ctrader_client.setDisconnectedCallback(desconectado_callback)
-    ctrader_client.setMessageReceivedCallback(mensaje_recibido)
+    ctrader_client.setConnectedCallback(
+        conectado_callback
+    )
+
+    ctrader_client.setDisconnectedCallback(
+        desconectado_callback
+    )
+
+    ctrader_client.setMessageReceivedCallback(
+        mensaje_recibido
+    )
 
     print("CTRADER: CALLBACKS CONFIGURADOS")
     print("CTRADER: INICIANDO SERVICIO")
@@ -470,11 +513,13 @@ def iniciar_ctrader():
 
 @app.route("/", methods=["GET"])
 def home():
+
     return "Servidor TradingView cTrader funcionando"
 
 
 @app.route("/status", methods=["GET"])
 def status():
+
     return "OK"
 
 
@@ -508,7 +553,40 @@ threading.Thread(
 # ============================================================
 
 if __name__ == "__main__":
+
     app.run(
         host="0.0.0.0",
-        port=int(os.environ.get("PORT", 10000))
+        port=int(
+            os.environ.get(
+                "PORT",
+                10000
+            )
+        )
     )
+
+
+
+Ahora hacemos la prueba
+Copiá todo este código.
+Reemplazá el contenido de app.py en GitHub.
+Guardá/commit.
+Esperá que Render haga el deploy.
+No mandes todavía una alerta de TradingView.
+Primero mirá los logs de Render.
+
+Lo que queremos encontrar es esta secuencia:
+
+CTRADER: CONECTADO
+CTRADER: ENVIANDO AUTENTICACION
+CTRADER: APLICACION AUTENTICADA
+CTRADER: ACCESS TOKEN PRESENTE: True
+CTRADER: SOLICITANDO CUENTAS
+CTRADER: RESPUESTA DE CUENTAS RECIBIDA
+CTRADER: CANTIDAD DE CUENTAS: ...
+CUENTA ENCONTRADA: 48481130
+CTRADER: CUENTA OBJETIVO ENCONTRADA
+CTRADER: AUTENTICANDO CUENTA
+CTRADER: CUENTA CTRADER AUTENTICADA
+ACCOUNT ID: 48481130
+DEMO: SI
+TRADING HABILITADO
