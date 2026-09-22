@@ -19,6 +19,7 @@ from ctrader_open_api.messages.OpenApiModelMessages_pb2 import (
 )
 
 from twisted.internet import reactor
+from twisted.internet._sslverify import CertificateOptions
 
 
 CLIENT_ID = os.getenv("CTRADER_CLIENT_ID")
@@ -62,6 +63,7 @@ def interpretar_alerta(message):
     symbol = None
 
     for k in SYMBOLS:
+
         if k in texto:
             symbol = k
             break
@@ -123,6 +125,7 @@ def run_ctrader():
 
         return
 
+
     def on_connected(client_instance):
 
         try:
@@ -142,7 +145,10 @@ def run_ctrader():
 
         except Exception as e:
 
-            print("ERROR EN AUTENTICACION DE APLICACION:", repr(e))
+            print(
+                "ERROR EN AUTENTICACION DE APLICACION:",
+                repr(e)
+            )
 
 
     def on_message(client_instance, msg):
@@ -151,7 +157,10 @@ def run_ctrader():
 
             pType = getattr(msg, "payloadType", None)
 
-            print("CTRADER: MENSAJE RECIBIDO:", pType)
+            print(
+                "CTRADER: MENSAJE RECIBIDO:",
+                pType
+            )
 
             if pType == 2100:
 
@@ -172,23 +181,40 @@ def run_ctrader():
 
                 payload = msg.payload
 
-                if hasattr(payload, "ctidTraderAccountId"):
+                if hasattr(
+                    payload,
+                    "ctidTraderAccountId"
+                ):
 
-                    if payload.ctidTraderAccountId == ACCOUNT_ID:
+                    if (
+                        payload.ctidTraderAccountId
+                        == ACCOUNT_ID
+                    ):
 
                         if status["app_auth"]:
 
                             status["acc_auth"] = True
 
-                            print("CTRADER: CUENTA AUTENTICADA")
-                            print("CTRADER: LISTO PARA OPERAR")
+                            print(
+                                "CTRADER: CUENTA AUTENTICADA"
+                            )
+
+                            print(
+                                "CTRADER: LISTO PARA OPERAR"
+                            )
 
         except Exception as e:
 
-            print("ERROR EN MENSAJE CTRADER:", repr(e))
+            print(
+                "ERROR EN MENSAJE CTRADER:",
+                repr(e)
+            )
 
 
-    def on_disconnected(client_instance, reason):
+    def on_disconnected(
+        client_instance,
+        reason
+    ):
 
         print("CTRADER: DESCONECTADO")
         print("RAZON:", reason)
@@ -210,7 +236,9 @@ def run_ctrader():
 
             try:
 
-                cfg = SYMBOLS.get(order["symbol"])
+                cfg = SYMBOLS.get(
+                    order["symbol"]
+                )
 
                 if not cfg:
 
@@ -254,16 +282,25 @@ def run_ctrader():
 
             except Exception as e:
 
-                print("ERROR ENVIANDO ORDEN:", repr(e))
+                print(
+                    "ERROR ENVIANDO ORDEN:",
+                    repr(e)
+                )
 
 
     try:
 
-        client.setConnectedCallback(on_connected)
+        client.setConnectedCallback(
+            on_connected
+        )
 
-        client.setMessageReceivedCallback(on_message)
+        client.setMessageReceivedCallback(
+            on_message
+        )
 
-        client.setDisconnectedCallback(on_disconnected)
+        client.setDisconnectedCallback(
+            on_disconnected
+        )
 
         print("CTRADER: INICIANDO SERVICIO")
 
@@ -309,7 +346,9 @@ def run_ctrader():
 
         if not reactor.running:
 
-            print("CTRADER: INICIANDO REACTOR")
+            print(
+                "CTRADER: INICIANDO REACTOR"
+            )
 
             reactor.run(
                 installSignalHandlers=0
@@ -329,10 +368,15 @@ threading.Thread(
 ).start()
 
 
-@app.route("/webhook", methods=["POST"])
+@app.route(
+    "/webhook",
+    methods=["POST"]
+)
 def webhook():
 
-    data = request.get_json(silent=True)
+    data = request.get_json(
+        silent=True
+    )
 
     msg = (
         (data.get("message") if data else None)
@@ -357,7 +401,10 @@ def webhook():
             "status": "error"
         }), 400
 
-    print("ORDEN INTERPRETADA:", parsed)
+    print(
+        "ORDEN INTERPRETADA:",
+        parsed
+    )
 
     order_queue.put(parsed)
 
@@ -367,7 +414,10 @@ def webhook():
     }), 200
 
 
-@app.route("/", methods=["GET"])
+@app.route(
+    "/",
+    methods=["GET"]
+)
 def home():
 
     return jsonify({
